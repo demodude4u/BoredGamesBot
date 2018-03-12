@@ -1,0 +1,502 @@
+package com.demod.discord.boredgames.game;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Random;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+
+import org.json.JSONObject;
+
+import com.demod.discord.boredgames.Emojis;
+import com.demod.discord.boredgames.Game;
+import com.google.common.primitives.Booleans;
+
+import javafx.util.Pair;
+import net.dv8tion.jda.core.EmbedBuilder;
+import net.dv8tion.jda.core.entities.Member;
+
+public class YahtzeeGame extends Game {
+
+	private enum ActionPhase {
+		HOTSEAT, ROLL_DICE, CHOOSE_CATEGORY, GAME_OVER
+	}
+
+	private enum Category {//
+		ONES("Ones", Emojis.BLOCK_1), //
+		TWOS("Twos", Emojis.BLOCK_2), //
+		THREES("Threes", Emojis.BLOCK_3), //
+		FOURS("Fours", Emojis.BLOCK_4), //
+		FIVES("Fives", Emojis.BLOCK_5), //
+		SIXES("Sixes", Emojis.BLOCK_6), //
+		THREE_OF_A_KIND("Three of a Kind", Emojis.FAMILY_MMB), //
+		FOUR_OF_A_KIND("Four of a Kind", Emojis.FAMILY_MMBB), //
+		FULL_HOUSE("Full House", Emojis.HOUSE), //
+		SMALL_STRAIGHT("Small Straight", Emojis.BLOCK_1234), //
+		LARGE_STRAIGHT("Large Straight", Emojis.SIGNAL_STRENGTH), //
+		CHANCE("Chance", Emojis.QUESTION), //
+		YAHTZEE("Yahtzee", Emojis.BANGBANG),//
+		;
+		private final String label;
+		private final String emoji;
+
+		private Category(String label, String emoji) {
+			this.label = label;
+			this.emoji = emoji;
+		}
+	}
+
+	private static final String JSONKEY_PLAYCOUNT = "play-count";
+
+	private static final String JSONKEY_BESTSCORE = "best-score";
+
+	private static final SortedMap<Integer, String> gameOverPhrases = new TreeMap<>();
+	static {
+		gameOverPhrases.put(0, "You want a higher score, not a lower one...");
+		gameOverPhrases.put(50, "You can do better than that...");
+		gameOverPhrases.put(100, "Go play Yahtzee Junior...");
+		gameOverPhrases.put(150, "Must've been unlucky rolls.");
+		gameOverPhrases.put(200, "Not a bad score.");
+		gameOverPhrases.put(250, "Good score.");
+		gameOverPhrases.put(300, "Well played!");
+		gameOverPhrases.put(350, "You are good at this!");
+		gameOverPhrases.put(400, "NICE ROLLS!");
+		gameOverPhrases.put(600, "WHAT A GOOD SCORE!");
+		gameOverPhrases.put(800, "GO BUY A LOTTERY TICKET!");
+		gameOverPhrases.put(1000, "YOU ARE A YAHTZEE GOD!");
+	}
+
+	private Member player = null;
+	private ActionPhase actionPhase;
+	private final int[] categoryPoints;
+	private final boolean[] categoryScored;
+	private int upperBonusPoints;
+	private int yahtzeeBonusPoints;
+	private final int[] rolledDice;
+	private final boolean[] lockedDice;
+	private int rollCount;
+	private final Random rand;
+
+	public YahtzeeGame() {
+		actionPhase = ActionPhase.HOTSEAT;
+		categoryPoints = new int[Category.values().length];
+		categoryScored = new boolean[categoryPoints.length];
+		upperBonusPoints = 0;
+		yahtzeeBonusPoints = 0;
+		rolledDice = new int[5];
+		lockedDice = new boolean[5];
+		rand = new Random();
+	}
+
+	@Override
+	public boolean allowUndo() {
+		return false;
+	}
+
+	@Override
+	public void buildDisplay(EmbedBuilder embed) {
+		embed.setTitle("Yahtzee!");
+		if (player != null) {
+			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+		}
+
+		if (actionPhase == ActionPhase.HOTSEAT) {
+			embed.setDescription("This is a singleplayer game. Press the " + Emojis.GAME_DIE + " to start!");
+			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
+
+		} else if (actionPhase == ActionPhase.ROLL_DICE) {
+			embed.addField("Score Card", generateDisplayScoreCard(), false);
+			embed.addField("Rolled Dice", generateDisplayRolledDice(true), true);
+			embed.addField("Rolls", "**" + (3 - rollCount) + "** Remaining", true);
+			embed.setFooter("Press 1-5 to lock the dice, press dice to roll again.", null);
+
+		} else if (actionPhase == ActionPhase.CHOOSE_CATEGORY) {
+			embed.addField("Score Card", generateDisplayScoreCard(), true);
+			embed.addField("Choose Scoring", generateDisplayChoices(), true);
+			embed.addField("Rolled Dice", generateDisplayRolledDice(false), false);
+			embed.setFooter("Press the matching symbol to choose a category.", null);
+
+		} else if (actionPhase == ActionPhase.GAME_OVER) {
+			embed.addField("Score Card", generateDisplayScoreCard(), true);
+			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
+			embed.setFooter("Game over! " + getGameOverMessage(), null);
+		}
+	}
+
+	private boolean checkFullHouse() {
+		return Arrays.stream(rolledDice).boxed().collect(Collectors.groupingBy(i -> i)).values().stream()
+				.mapToInt(List::size).filter(s -> s >= 2 && s <= 3).sum() == 5;
+	}
+
+	private boolean checkJoker() {
+		return checkYahtzee() && categoryScored[Category.YAHTZEE.ordinal()];
+	}
+
+	private boolean checkJokerUpperScored() {
+		return categoryScored[rolledDice[0] - 1];
+	}
+
+	private boolean checkLowerAvailable() {
+		return Booleans.asList(categoryScored).stream().skip(6).anyMatch(s -> !s);
+	}
+
+	private boolean checkOfAKind(int count) {
+		return Arrays.stream(rolledDice).boxed().collect(Collectors.groupingBy(i -> i)).values().stream()
+				.anyMatch(l -> l.size() >= count);
+	}
+
+	private boolean checkStraight(int count) {
+		int sequence = 0;
+		for (int i = 1; i <= 6; i++) {
+			final int match = i;
+			if (Arrays.stream(rolledDice).anyMatch(dice -> dice == match)) {
+				sequence++;
+				if (sequence == count) {
+					return true;
+				}
+			} else {
+				sequence = 0;
+			}
+		}
+		return false;
+	}
+
+	private boolean checkYahtzee() {
+		return Arrays.stream(rolledDice).distinct().count() == 1;
+	}
+
+	private void chooseCategory(Category category) {
+		if (checkJoker() && (categoryPoints[Category.YAHTZEE.ordinal()] > 0)) {
+			yahtzeeBonusPoints += 100;
+		}
+
+		if ((upperBonusPoints == 0) && (category.ordinal() < 6) && (getUpperPoints() + getPoints(category) >= 63)) {
+			upperBonusPoints = 35;
+		}
+
+		int points = checkJoker() ? getJokerPoints(category) : getPoints(category);
+		categoryPoints[category.ordinal()] = points;
+		categoryScored[category.ordinal()] = true;
+
+		if (isGameOver()) {
+			actionPhase = ActionPhase.GAME_OVER;
+			savePlayerScore();
+
+		} else {
+			startRollDicePhase();
+		}
+	}
+
+	@Override
+	public Game copy() {
+		return null;// No copy because no undo
+	}
+
+	private int[] generateBonusPoints() {
+		int[] bonusPoints = new int[categoryPoints.length];
+		for (int i = 0; i < bonusPoints.length; i++) {
+			Category category = Category.values()[i];
+			bonusPoints[i] = getBonusPoints(category);
+		}
+		return bonusPoints;
+	}
+
+	private String generateDisplayChoices() {
+		StringBuilder sb = new StringBuilder();
+
+		int[] gainPoints = generateGainPoints();
+		int[] bonusPoints = generateBonusPoints();
+
+		boolean firstLine = true;
+		for (int i = 0; i < categoryPoints.length; i++) {
+			Category category = Category.values()[i];
+
+			if (categoryScored[i]) {
+				continue;
+			}
+
+			if (!firstLine) {
+				sb.append('\n');
+			} else {
+				firstLine = false;
+			}
+
+			sb.append(category.emoji + " ");
+
+			sb.append((gainPoints[i] > 0) ? ("**+" + gainPoints[i] + "**") : Integer.toString(gainPoints[i]));
+			sb.append((bonusPoints[i] > 0) ? (" **(+" + bonusPoints[i] + " Bonus)**") : "");
+
+			sb.append(" " + category.label);
+		}
+
+		return sb.toString();
+	}
+
+	private String generateDisplayLeaderboard() {
+		List<Pair<Member, Integer>> leaderboard = getGlobalSaves().entrySet().stream()
+				.map(e -> new Pair<>(e.getKey(), e.getValue().optInt(JSONKEY_BESTSCORE, 0)))
+				.sorted((p1, p2) -> Integer.compare(p2.getValue(), p1.getValue())).limit(10)
+				.collect(Collectors.toList());
+
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < leaderboard.size(); i++) {
+			if (i > 0) {
+				sb.append('\n');
+			}
+			Pair<Member, Integer> pair = leaderboard.get(i);
+			sb.append("#" + (i + 1) + " " + pair.getKey().getEffectiveName() + " (" + pair.getValue() + " points)");
+		}
+		return sb.toString();
+	}
+
+	private String generateDisplayRolledDice(boolean showLocks) {
+		StringBuilder sb = new StringBuilder();
+
+		for (int dice : rolledDice) {
+			sb.append(Emojis.BLOCK_NUMBER[dice]);
+		}
+
+		if (showLocks) {
+			sb.append('\n');
+			for (boolean lock : lockedDice) {
+				sb.append(lock ? Emojis.LOCK : Emojis.SMALL_BLACK_SQUARE);
+			}
+		}
+
+		return sb.toString();
+	}
+
+	private String generateDisplayScoreCard() {
+		StringBuilder sb = new StringBuilder();
+
+		BiFunction<Integer, String, String> formatter = (num, label) -> num != null
+				? String.format("`|%3d|` %s\n", num, label) : String.format("`|   |` %s\n", label);
+		BiFunction<Integer, String, String> bonusFormatter = (num, label) -> formatter.apply(num > 0 ? num : null,
+				label);
+
+		for (int i = 0; i < categoryPoints.length; i++) {
+			Category category = Category.values()[i];
+			sb.append(formatter.apply(categoryScored[i] ? categoryPoints[i] : null, category.label));
+		}
+
+		sb.append(bonusFormatter.apply(upperBonusPoints, "Upper Bonus (" + getUpperPoints() + "/" + 63 + ")"));
+		if (yahtzeeBonusPoints > 0) {
+			sb.append(bonusFormatter.apply(yahtzeeBonusPoints, "__*Yahtzee Bonus*__"));
+		}
+		sb.append(formatter.apply(getTotalScore(), "__**Total Score**__"));
+
+		return sb.toString();
+	}
+
+	private int[] generateGainPoints() {
+		boolean joker = checkJoker();
+		int[] gainPoints = new int[categoryPoints.length];
+		for (int i = 0; i < gainPoints.length; i++) {
+			if (categoryScored[i]) {
+				continue;
+			}
+			Category category = Category.values()[i];
+			gainPoints[i] = joker ? getJokerPoints(category) : getPoints(category);
+		}
+		return gainPoints;
+	}
+
+	private int getBonusPoints(Category category) {
+		if (checkJoker()) {
+			return 100;
+		}
+		switch (category) {
+		case ONES:
+		case TWOS:
+		case THREES:
+		case FOURS:
+		case FIVES:
+		case SIXES:
+			return ((upperBonusPoints == 0) && (getUpperPoints() + getPoints(category) >= 63)) ? 35 : 0;
+		case THREE_OF_A_KIND:
+		case FOUR_OF_A_KIND:
+		case FULL_HOUSE:
+		case SMALL_STRAIGHT:
+		case LARGE_STRAIGHT:
+		case CHANCE:
+		case YAHTZEE:
+			return 0;
+		}
+		throw new InternalError();
+	}
+
+	private String getGameOverMessage() {
+		int totalScore = getTotalScore();
+		String message = null;
+		for (Entry<Integer, String> entry : gameOverPhrases.entrySet()) {
+			if (totalScore >= entry.getKey()) {
+				message = entry.getValue();
+			} else {
+				break;
+			}
+		}
+		return message;
+	}
+
+	private int getJokerPoints(Category category) {
+		switch (category) {
+		case ONES:
+		case TWOS:
+		case THREES:
+		case FOURS:
+		case FIVES:
+		case SIXES:
+		case THREE_OF_A_KIND:
+		case FOUR_OF_A_KIND:
+		case CHANCE:
+			return getPoints(category);
+		case FULL_HOUSE:
+			return 25;
+		case SMALL_STRAIGHT:
+			return 30;
+		case LARGE_STRAIGHT:
+			return 40;
+		case YAHTZEE:
+			throw new InternalError();
+		}
+		throw new InternalError();
+	}
+
+	private int getPoints(Category category) {
+		switch (category) {
+		case ONES:
+		case TWOS:
+		case THREES:
+		case FOURS:
+		case FIVES:
+		case SIXES:
+			return Arrays.stream(rolledDice).filter(dice -> dice == category.ordinal() + 1).sum();
+		case THREE_OF_A_KIND:
+			return checkOfAKind(3) ? Arrays.stream(rolledDice).sum() : 0;
+		case FOUR_OF_A_KIND:
+			return checkOfAKind(4) ? Arrays.stream(rolledDice).sum() : 0;
+		case FULL_HOUSE:
+			return checkFullHouse() ? 25 : 0;
+		case SMALL_STRAIGHT:
+			return checkStraight(4) ? 30 : 0;
+		case LARGE_STRAIGHT:
+			return checkStraight(5) ? 40 : 0;
+		case CHANCE:
+			return Arrays.stream(rolledDice).sum();
+		case YAHTZEE:
+			return checkYahtzee() ? 50 : 0;
+		}
+		throw new InternalError();
+	}
+
+	public int getTotalScore() {
+		return Arrays.stream(categoryPoints).sum() + upperBonusPoints + yahtzeeBonusPoints;
+	}
+
+	private int getUpperPoints() {
+		return Arrays.stream(categoryPoints).limit(6).sum();
+	}
+
+	@Override
+	public boolean isGameOver() {
+		for (boolean scored : categoryScored) {
+			if (!scored) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private void playerStart(Member player) {
+		this.player = player;
+		startRollDicePhase();
+	}
+
+	@Override
+	public void registerActions(ActionRegistry registry) {
+		if (actionPhase == ActionPhase.HOTSEAT) {
+			registry.addAction(Emojis.GAME_DIE, p -> {
+				playerStart(p);
+			});
+
+		} else if (actionPhase == ActionPhase.ROLL_DICE) {
+			registry.addExclusiveAction(player, Emojis.BLOCK_1, p -> toggleLockDice(0));
+			registry.addExclusiveAction(player, Emojis.BLOCK_2, p -> toggleLockDice(1));
+			registry.addExclusiveAction(player, Emojis.BLOCK_3, p -> toggleLockDice(2));
+			registry.addExclusiveAction(player, Emojis.BLOCK_4, p -> toggleLockDice(3));
+			registry.addExclusiveAction(player, Emojis.BLOCK_5, p -> toggleLockDice(4));
+			registry.addExclusiveAction(player, Emojis.GAME_DIE, p -> rollDice());
+
+		} else if (actionPhase == ActionPhase.CHOOSE_CATEGORY) {
+			if (checkJoker()) {// Forced Joker Rules
+				if (!checkJokerUpperScored()) {
+					Category category = Category.values()[rolledDice[0] - 1];
+					registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				} else if (checkLowerAvailable()) {
+					for (int i = 6; i < categoryPoints.length; i++) {
+						final Category category = Category.values()[i];
+						if (categoryScored[i]) {
+							continue;
+						}
+						registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+					}
+				} else {
+					for (int i = 0; i < 6; i++) {
+						final Category category = Category.values()[i];
+						if (categoryScored[i]) {
+							continue;
+						}
+						registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+					}
+				}
+			} else {
+				for (int i = 0; i < categoryPoints.length; i++) {
+					final Category category = Category.values()[i];
+					if (categoryScored[i]) {
+						continue;
+					}
+					registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				}
+			}
+		}
+	}
+
+	private void rollDice() {
+		for (int i = 0; i < rolledDice.length; i++) {
+			if (!lockedDice[i]) {
+				rolledDice[i] = rand.nextInt(6) + 1;
+			}
+		}
+
+		rollCount++;
+
+		if (rollCount == 3) {
+			actionPhase = ActionPhase.CHOOSE_CATEGORY;
+		}
+	}
+
+	private void savePlayerScore() {
+		JSONObject playerSave = getGlobalSave(player).orElseGet(JSONObject::new);
+		System.out.println(playerSave.toString(2));
+		playerSave.put(JSONKEY_BESTSCORE, Math.max(getTotalScore(), playerSave.optInt(JSONKEY_BESTSCORE, 0)));
+		playerSave.put(JSONKEY_PLAYCOUNT, playerSave.optInt(JSONKEY_PLAYCOUNT, 0) + 1);
+		System.out.println(playerSave.toString(2));
+		setGlobalSave(player, Optional.of(playerSave));
+	}
+
+	private void startRollDicePhase() {
+		actionPhase = ActionPhase.ROLL_DICE;
+		rollCount = 0;
+		Arrays.fill(lockedDice, false);
+		rollDice();
+	}
+
+	private void toggleLockDice(int dice) {
+		lockedDice[dice] = !lockedDice[dice];
+	}
+
+}
