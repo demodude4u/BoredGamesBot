@@ -66,14 +66,9 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 				.create();
 	}
 
-	private synchronized void addActionReactions(Message message, LinkedHashMap<String, Action> gameActions,
-			boolean allowUndo) {
+	private synchronized void addActionReactions(Message message, LinkedHashMap<String, Action> gameActions) {
 		for (String emoji : gameActions.keySet()) {
 			message.addReaction(emoji).complete();
-		}
-
-		if (allowUndo) {
-			message.addReaction(Emojis.REWIND).complete();
 		}
 	}
 
@@ -91,15 +86,8 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 			Map<String, Action> gameActions = session.getActions().get();
 
 			if (gameActions.containsKey(e.getReactionEmote().getName())) {
-				session.getUndo().push(session.getGame().copy());
-
 				Action action = gameActions.get(e.getReactionEmote().getName());
 				action.apply(e.getMember());
-
-				updateGameMessage(e.getTextChannel(), session);
-
-			} else if (!session.getUndo().isEmpty() && e.getReactionEmote().getName().equals(Emojis.REWIND)) {
-				session.setGame(session.getUndo().pop());
 
 				updateGameMessage(e.getTextChannel(), session);
 			}
@@ -157,8 +145,7 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 			message.clearReactions().complete();
 			channel.editMessageById(message.getId(), messageEmbed).complete();
 			if (!session.getGame().isGameOver()) {
-				addActionReactions(message, session.getActions().get(),
-						!session.getUndo().isEmpty() && session.getGame().allowUndo());
+				addActionReactions(message, session.getActions().get());
 			}
 
 		} else {
@@ -168,8 +155,7 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 			Message message = channel.sendMessage(messageEmbed).complete();
 			session.setDisplay(Optional.of(message));
 			if (!session.getGame().isGameOver()) {
-				addActionReactions(message, session.getActions().get(),
-						!session.getUndo().isEmpty() && session.getGame().allowUndo());
+				addActionReactions(message, session.getActions().get());
 			}
 		}
 	}

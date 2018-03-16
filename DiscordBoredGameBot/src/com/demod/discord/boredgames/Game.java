@@ -54,11 +54,7 @@ public abstract class Game {
 
 	private Guild guild;
 
-	public abstract boolean allowUndo();
-
 	public abstract void buildDisplay(EmbedBuilder embed);
-
-	public abstract Game copy();
 
 	public Optional<JSONObject> getGlobalSave(Member player) {
 		return getGroupSave(GROUP_GLOBAL, player);

@@ -28,7 +28,6 @@ public class Connect4Game extends Game {
 	private int winner = -1;
 	private int lastTurnColumn = -1;
 	private int lastTurn = -1;
-	private int turnCount = 0;
 
 	public Connect4Game() {
 		tiles = new Tile[columns][rows];
@@ -37,31 +36,6 @@ public class Connect4Game extends Game {
 		}
 
 		emojiPlayerSet = Emojis.getRandomPlayerSet();
-	}
-
-	private Connect4Game(Connect4Game copy) {
-		this.hotseat = copy.hotseat;
-		this.columns = copy.columns;
-		this.rows = copy.rows;
-		tiles = new Tile[columns][rows];
-		for (int i = 0; i < tiles.length; i++) {
-			System.arraycopy(copy.tiles[i], 0, tiles[i], 0, tiles[i].length);
-		}
-		this.emojiPlayerSet = copy.emojiPlayerSet;
-		this.players.addAll(copy.players);
-		this.winner = copy.winner;
-		this.lastTurnColumn = copy.lastTurnColumn;
-		this.lastTurn = copy.lastTurn;
-		this.turnCount = copy.turnCount;
-	}
-
-	@Override
-	public boolean allowUndo() {
-		// TODO determine if undo should be allowed, or perhaps some penalty or
-		// vote system
-
-		// FIXME Disabled until new system in place
-		return false;
 	}
 
 	public void applyMove(Member player, int column) {
@@ -77,7 +51,6 @@ public class Connect4Game extends Game {
 			if (height == 0 || tiles[column][height - 1] != Tile.NONE) {
 				tiles[column][height] = tile;
 				lastTurnColumn = column;
-				turnCount++;
 				lastTurn = turn;
 				checkForWinner(column, height, tile);
 				return;
@@ -204,11 +177,6 @@ public class Connect4Game extends Game {
 				inARow = 0;
 			}
 		}
-	}
-
-	@Override
-	public Game copy() {
-		return new Connect4Game(this);
 	}
 
 	private String generateTilesEmoji() {

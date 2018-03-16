@@ -93,11 +93,6 @@ public class YahtzeeGame extends Game {
 	}
 
 	@Override
-	public boolean allowUndo() {
-		return false;
-	}
-
-	@Override
 	public void buildDisplay(EmbedBuilder embed) {
 		embed.setTitle("Yahtzee!");
 		if (player != null) {
@@ -191,11 +186,6 @@ public class YahtzeeGame extends Game {
 		}
 	}
 
-	@Override
-	public Game copy() {
-		return null;// No copy because no undo
-	}
-
 	private int[] generateBonusPoints() {
 		int[] bonusPoints = new int[categoryPoints.length];
 		for (int i = 0; i < bonusPoints.length; i++) {
@@ -274,7 +264,8 @@ public class YahtzeeGame extends Game {
 		StringBuilder sb = new StringBuilder();
 
 		BiFunction<Integer, String, String> formatter = (num, label) -> num != null
-				? String.format("`|%3d|` %s\n", num, label) : String.format("`|   |` %s\n", label);
+				? String.format("`|%3d|` %s\n", num, label)
+				: String.format("`|   |` %s\n", label);
 		BiFunction<Integer, String, String> bonusFormatter = (num, label) -> formatter.apply(num > 0 ? num : null,
 				label);
 
