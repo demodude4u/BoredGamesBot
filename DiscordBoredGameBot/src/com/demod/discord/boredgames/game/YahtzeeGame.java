@@ -1,5 +1,6 @@
 package com.demod.discord.boredgames.game;
 
+import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map.Entry;
@@ -16,7 +17,6 @@ import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.google.common.primitives.Booleans;
 
-import javafx.util.Pair;
 import net.dv8tion.jda.core.EmbedBuilder;
 import net.dv8tion.jda.core.entities.Member;
 
@@ -227,8 +227,8 @@ public class YahtzeeGame extends Game {
 	}
 
 	private String generateDisplayLeaderboard() {
-		List<Pair<Member, Integer>> leaderboard = getGlobalSaves().entrySet().stream()
-				.map(e -> new Pair<>(e.getKey(), e.getValue().optInt(JSONKEY_BESTSCORE, 0)))
+		List<Entry<Member, Integer>> leaderboard = getGlobalSaves().entrySet().stream()
+				.map(e -> new SimpleImmutableEntry<>(e.getKey(), e.getValue().optInt(JSONKEY_BESTSCORE, 0)))
 				.sorted((p1, p2) -> Integer.compare(p2.getValue(), p1.getValue())).limit(10)
 				.collect(Collectors.toList());
 
@@ -237,7 +237,7 @@ public class YahtzeeGame extends Game {
 			if (i > 0) {
 				sb.append('\n');
 			}
-			Pair<Member, Integer> pair = leaderboard.get(i);
+			Entry<Member, Integer> pair = leaderboard.get(i);
 			sb.append("#" + (i + 1) + " " + pair.getKey().getEffectiveName() + " (" + pair.getValue() + " points)");
 		}
 		return sb.toString();
