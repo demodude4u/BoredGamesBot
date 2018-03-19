@@ -35,6 +35,10 @@ public abstract class Game {
 				}
 			});
 		}
+
+		default void addExclusiveAction(Member player, String emoji, PlayerlessAction action) {
+			addExclusiveAction(player, emoji, (Action) action);
+		}
 	}
 
 	@FunctionalInterface

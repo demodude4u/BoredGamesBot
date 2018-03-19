@@ -1,14 +1,18 @@
 package com.demod.discord.boredgames.game;
 
+import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -35,6 +39,8 @@ public class DominionGame extends Game {
 		private final List<DominionCards> hand = new ArrayList<>();
 		private final List<DominionCards> play = new ArrayList<>();
 
+		private final List<Entry<Predicate<DominionCards>, Runnable>> firstPlayConditions = new ArrayList<>();
+
 		private int actionsAvailable;
 		private int buysAvailable;
 		private int coinsAvailable;
@@ -56,8 +62,7 @@ public class DominionGame extends Game {
 		}
 
 		public void addFirstPlayCondition(Predicate<DominionCards> condition, Runnable action) {
-			// TODO Auto-generated method stub
-
+			firstPlayConditions.add(new SimpleImmutableEntry<>(condition, action));
 		}
 
 		private boolean canBuyCards() {
@@ -78,6 +83,8 @@ public class DominionGame extends Game {
 
 			discard.addAll(play);
 			play.clear();
+
+			firstPlayConditions.clear();
 
 			for (int i = 0; i < 5; i++) {
 				Optional<DominionCards> card = takeCardFromDeck();
@@ -152,6 +159,15 @@ public class DominionGame extends Game {
 				int coins = CardType.TREASURE.getInteraction(card).getCoinValue(this);
 				addCoins(coins);
 			}
+
+			firstPlayConditions.removeIf(e -> {
+				if (e.getKey().test(card)) {
+					e.getValue().run();
+					return true;
+				} else {
+					return false;
+				}
+			});
 		}
 
 		public void putInHand(DominionCards card) {
@@ -218,6 +234,8 @@ public class DominionGame extends Game {
 
 	@Override
 	public void buildDisplay(EmbedBuilder embed) {
+		embed.setAuthor("Dominion Card Game");
+
 		switch (phase) {
 		case HOTSEAT:
 			embed.setDescription("This is a 2-4 player game, and can take some time to play.\n\n"
@@ -225,32 +243,83 @@ public class DominionGame extends Game {
 					+ "You play action cards that help you (or hurt others) and buy more cards to build the best deck to win.\n"
 					+ "The game is over when any 3 supplies of cards run out, or when the highest victory card (Province) supply runs out.\n\n"
 					+ "Press the " + Emojis.HAND_SPLAYED + " to join, press the " + Emojis.SHUFFLE
-					+ " to generate a new set of kindoms, and press the " + Emojis.GAME_DIE + " to begin the game!");
+					+ " to generate a new set of kingdoms, press the " + Emojis.QUESTION
+					+ " for details, and press the " + Emojis.GAME_DIE + " to begin the game!");
 
 			if (!players.isEmpty()) {
 				embed.addField("Players", players.stream().map(Player::getMember).map(Member::getEffectiveName)
 						.collect(Collectors.joining("\n")), true);
 			}
 
-			// TODO Display picked kingdoms
+			embed.addField("Kingdoms", generateDisplayCardList(kingdoms), false);
 			break;
 
 		case PLAY_ACTIONS:
-			// TODO
+			embed.setTitle("Action Phase - Play any Action Cards");
+			embed.setDescription(
+					"Play action cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
+							+ Emojis.TRACK_NEXT + ".");
+
+			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+			embed.addField("Current Player", generatePlayerStats(currentPlayer(), true), false);
+
+			for (DominionCards card : getPlayActionChoices()) {
+				embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
+			}
 			break;
 
 		case PLAY_TREASURES:
-			// TODO
+			embed.setTitle("Treasure Phase - Play any Treasure Cards");
+			embed.setDescription(
+					"Play treasure cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
+							+ Emojis.TRACK_NEXT + ".");
+
+			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+			embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+
+			for (DominionCards card : getPlayTreasureChoices()) {
+				embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
+			}
 			break;
 
 		case BUY:
-			// TODO
+			embed.setTitle("Buy Phase - Buy any Supply Cards");
+			embed.setDescription(
+					"Buy cards from the supply if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
+							+ Emojis.TRACK_NEXT + ".");
+
+			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+			embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+
+			for (DominionCards card : getBuyChoices()) {
+				embed.addField(card.getEmoji() + " Buy " + card.getTitle() + " (Cost: " + card.getCost() + ")",
+						card.getText(), true);
+			}
 			break;
 
 		case GAME_OVER:
 			// TODO
 			break;
 		}
+	}
+
+	private void buyChooseCard(DominionCards card) {
+		Player player = currentPlayer();
+		player.buysAvailable--;
+		player.coinsAvailable -= card.getCost();
+		supply.remove(card);
+		player.discard(card);
+
+		if (!player.canBuyCards()) {
+			endTurn();
+		}
+	}
+
+	private void buyNextPhase() {
+		endTurn();
 	}
 
 	private Player currentPlayer() {
@@ -263,9 +332,43 @@ public class DominionGame extends Game {
 		startPlayActionsPhase();
 	}
 
+	private String generateDisplayCardList(Collection<DominionCards> cards) {
+		return cards.stream().map(c -> c.getEmoji() + c.getTitle()).collect(Collectors.joining("\n"));
+	}
+
+	private String generatePlayerStats(Player player, boolean showActionsRemaining) {
+		List<String> lines = new ArrayList<>();
+
+		lines.add("Player: **" + currentPlayer().getMember().getEffectiveName() + "**");
+
+		if (showActionsRemaining) {
+			lines.add("Actions Remaining: **" + player.actionsAvailable + "**");
+		}
+		lines.add("Buys Remaining: **" + player.buysAvailable + "**");
+		lines.add("Coins Available: **" + player.coinsAvailable + "**");
+		lines.add("Deck Cards Remaining: **" + player.deck.size() + "**");
+		lines.add("Discarded Cards: **" + player.discard.size() + "**");
+
+		return lines.stream().collect(Collectors.joining("\n"));
+	}
+
+	private LinkedHashSet<DominionCards> getBuyChoices() {
+		return new LinkedHashSet<>(getSupplyCardsAtMostCost(currentPlayer().coinsAvailable));
+	}
+
+	private LinkedHashSet<DominionCards> getPlayActionChoices() {
+		return currentPlayer().hand.stream().filter(c -> c.getType() == CardType.ACTION)
+				.collect(Collectors.toCollection(LinkedHashSet::new));
+	}
+
+	private LinkedHashSet<DominionCards> getPlayTreasureChoices() {
+		return currentPlayer().hand.stream().filter(c -> c.getType() == CardType.TREASURE)
+				.collect(Collectors.toCollection(LinkedHashSet::new));
+	}
+
 	public List<DominionCards> getSupplyCardsAtMostCost(int coins) {
-		// TODO
-		return null;
+		return supply.entrySet().stream().map(Multiset.Entry::getElement).filter(c -> c.getCost() <= coins)
+				.collect(Collectors.toList());
 	}
 
 	public void hotseatGameStart(Member player) {
@@ -288,7 +391,6 @@ public class DominionGame extends Game {
 	}
 
 	private void initializeGame() {
-		kingdoms.clear();
 		supply.clear();
 		trash.clear();
 
@@ -330,6 +432,35 @@ public class DominionGame extends Game {
 		}
 	}
 
+	private void playActionsChooseCard(DominionCards card) {
+		Player player = currentPlayer();
+		player.actionsAvailable--;
+		player.removeFromHand(card);
+		player.playCard(card);
+
+		if (!player.canPlayActions()) {
+			startPlayTreasuresPhase();
+		}
+	}
+
+	private void playActionsNextPhase() {
+		startPlayTreasuresPhase();
+	}
+
+	private void playTreasuresChooseCard(DominionCards card) {
+		Player player = currentPlayer();
+		player.removeFromHand(card);
+		player.playCard(card);
+
+		if (!player.canPlayTreasures()) {
+			startBuyPhase();
+		}
+	}
+
+	private void playTreasuresNextPhase() {
+		startBuyPhase();
+	}
+
 	@Override
 	public void registerActions(ActionRegistry registry) {
 		switch (phase) {
@@ -338,26 +469,39 @@ public class DominionGame extends Game {
 				registry.addAction(Emojis.HAND_SPLAYED, this::hotseatNewPlayer);
 			}
 			registry.addAction(Emojis.SHUFFLE, this::hotseatShuffle);
-			if (players.size() >= 2) {
+			if (players.size() >= 1) {// FIXME 2) {
 				registry.addAction(Emojis.GAME_DIE, this::hotseatGameStart);
 			}
 			break;
 
 		case PLAY_ACTIONS:
-			// TODO
+			Member currentPlayer = currentPlayer().getMember();
+			registerCardChoices(registry, currentPlayer, getPlayActionChoices(), this::playActionsChooseCard);
+			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::playActionsNextPhase);
 			break;
 
 		case PLAY_TREASURES:
-			// TODO
+			currentPlayer = currentPlayer().getMember();
+			registerCardChoices(registry, currentPlayer, getPlayTreasureChoices(), this::playTreasuresChooseCard);
+			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::playTreasuresNextPhase);
 			break;
 
 		case BUY:
-			// TODO
+			currentPlayer = currentPlayer().getMember();
+			registerCardChoices(registry, currentPlayer, getBuyChoices(), this::buyChooseCard);
+			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::buyNextPhase);
 			break;
 
 		case GAME_OVER:
 			// TODO
 			break;
+		}
+	}
+
+	private void registerCardChoices(ActionRegistry registry, Member member,
+			LinkedHashSet<DominionCards> playActionChoices, Consumer<DominionCards> action) {
+		for (DominionCards card : playActionChoices) {
+			registry.addExclusiveAction(member, card.getEmoji(), () -> action.accept(card));
 		}
 	}
 

@@ -6,7 +6,9 @@ import static com.demod.discord.boredgames.game.DominionCards.CardType.TREASURE;
 import static com.demod.discord.boredgames.game.DominionCards.CardType.VICTORY;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Optional;
 
 import com.demod.discord.boredgames.Emojis;
@@ -144,6 +146,24 @@ public enum DominionCards {
 			kingdoms[i - 7] = values()[i];
 		}
 	}
+
+	private static final LinkedHashMap<String, String> textReplace = new LinkedHashMap<>();
+	static {
+		// TODO determine if emojis are doable
+		// String actionEmoji = Emojis.ARROW_FORWARD;
+		// String coinEmoji = Emojis.DOLLAR;
+		// String cardEmoji = Emojis.TICKET;
+		// String victoryEmoji = Emojis.SHIELD;
+
+		String[] letter = { "A", "B", "C", "D", "VP" };
+		String[] labels = { "Action", "Buy", "Coin", "Card", "Victory Point" };
+		for (int i = 0; i < letter.length; i++) {
+			for (int n = 1; n <= 9; n++) {
+				textReplace.put(n + letter[i], "**" + n + " " + labels[i] + (n > 1 ? "s" : "") + "**");
+			}
+		}
+	}
+
 	private final String title;
 	private final String emoji;
 	private final int cost;
@@ -151,6 +171,7 @@ public enum DominionCards {
 	private final CardSubType subType;
 
 	private final String text;
+	private String formattedText = null;
 
 	private Object typeFunction;
 
@@ -182,7 +203,13 @@ public enum DominionCards {
 	}
 
 	public String getText() {
-		return text;
+		if (formattedText == null) {
+			formattedText = text.replace('|', '\n');
+			for (Entry<String, String> entry : textReplace.entrySet()) {
+				formattedText = formattedText.replace(entry.getKey(), entry.getValue());
+			}
+		}
+		return formattedText;
 	}
 
 	public String getTitle() {

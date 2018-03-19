@@ -43,8 +43,10 @@ public final class Emojis {
 	public static final String SMALL_RED_DOWN_ARROW = "\uD83D\uDD3B";
 
 	public static final String ARROW_UP = "\u2B06";
+	public static final String ARROW_FORWARD = "\u25B6";
 	public static final String REWIND = "\u23EA";
 	public static final String SHUFFLE = "\uD83D\uDD00";
+	public static final String TRACK_NEXT = "\u23ED";
 
 	public static final String QUESTION = "\u2753";
 	public static final String BANGBANG = "\u203C";
@@ -107,6 +109,8 @@ public final class Emojis {
 	public static final String SHOPPING_BAGS = "\uD83D\uDECD";
 	public static final String CRYSTAL_BALL = "\uD83D\uDD2E";
 	public static final String CROSSED_SWORDS = "\u2694";
+	public static final String TICKET = "\uD83C\uDFAB";
+	public static final String SHIELD = "\uD83D\uDEE1";
 
 	public static final String RICE_SCENE = "\uD83C\uDF91";
 	public static final String FOUNTAIN = "\u26F2";

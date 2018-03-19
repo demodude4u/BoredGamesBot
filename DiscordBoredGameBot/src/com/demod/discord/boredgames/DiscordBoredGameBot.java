@@ -11,6 +11,7 @@ import com.demod.dcba.DiscordBot;
 import com.demod.dcba.ReactionWatcher;
 import com.demod.discord.boredgames.Game.Action;
 import com.demod.discord.boredgames.game.Connect4Game;
+import com.demod.discord.boredgames.game.DominionGame;
 import com.demod.discord.boredgames.game.YahtzeeGame;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
@@ -49,7 +50,9 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 				.addCommand("connect4", (e) -> startGame(e.getTextChannel(), new Connect4Game()))//
 				.withHelp("Start a game of Connect Four. (2-4 Players)")//
 				.addCommand("yahtzee", (e) -> startGame(e.getTextChannel(), new YahtzeeGame()))//
-				.withHelp("Start a game of Yahtzee! (1 Player)")// TODO multi
+				.withHelp("Start a game of Yahtzee! (1 Player)")
+				.addCommand("dominion", (e) -> startGame(e.getTextChannel(), new DominionGame()))//
+				.withHelp("Start a game of Dominion! (2-4 Players)")
 				//
 				.addReactionWatcher(new ReactionWatcher() {
 					@Override
