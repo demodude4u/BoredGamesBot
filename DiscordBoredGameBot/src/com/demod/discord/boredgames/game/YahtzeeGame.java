@@ -13,18 +13,14 @@ import java.util.stream.Collectors;
 
 import org.json.JSONObject;
 
+import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.google.common.primitives.Booleans;
 
-import net.dv8tion.jda.core.EmbedBuilder;
 import net.dv8tion.jda.core.entities.Member;
 
 public class YahtzeeGame extends Game {
-
-	private enum ActionPhase {
-		HOTSEAT, ROLL_DICE, CHOOSE_CATEGORY, GAME_OVER
-	}
 
 	private enum Category {//
 		ONES("Ones", Emojis.BLOCK_1), //
@@ -51,7 +47,6 @@ public class YahtzeeGame extends Game {
 	}
 
 	private static final String JSONKEY_PLAYCOUNT = "play-count";
-
 	private static final String JSONKEY_BESTSCORE = "best-score";
 
 	private static final SortedMap<Integer, String> gameOverPhrases = new TreeMap<>();
@@ -71,7 +66,6 @@ public class YahtzeeGame extends Game {
 	}
 
 	private Member player = null;
-	private ActionPhase actionPhase;
 	private final int[] categoryPoints;
 	private final boolean[] categoryScored;
 	private int upperBonusPoints;
@@ -82,7 +76,6 @@ public class YahtzeeGame extends Game {
 	private final Random rand;
 
 	public YahtzeeGame() {
-		actionPhase = ActionPhase.HOTSEAT;
 		categoryPoints = new int[Category.values().length];
 		categoryScored = new boolean[categoryPoints.length];
 		upperBonusPoints = 0;
@@ -90,36 +83,6 @@ public class YahtzeeGame extends Game {
 		rolledDice = new int[5];
 		lockedDice = new boolean[5];
 		rand = new Random();
-	}
-
-	@Override
-	public void buildDisplay(EmbedBuilder embed) {
-		embed.setTitle("Yahtzee!");
-		if (player != null) {
-			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
-		}
-
-		if (actionPhase == ActionPhase.HOTSEAT) {
-			embed.setDescription("This is a singleplayer game. Press the " + Emojis.GAME_DIE + " to start!");
-			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
-
-		} else if (actionPhase == ActionPhase.ROLL_DICE) {
-			embed.addField("Score Card", generateDisplayScoreCard(), false);
-			embed.addField("Rolled Dice", generateDisplayRolledDice(true), true);
-			embed.addField("Rolls", "**" + (3 - rollCount) + "** Remaining", true);
-			embed.setFooter("Press 1-5 to lock the dice, press dice to roll again.", null);
-
-		} else if (actionPhase == ActionPhase.CHOOSE_CATEGORY) {
-			embed.addField("Score Card", generateDisplayScoreCard(), true);
-			embed.addField("Choose Scoring", generateDisplayChoices(), true);
-			embed.addField("Rolled Dice", generateDisplayRolledDice(false), false);
-			embed.setFooter("Press the matching symbol to choose a category.", null);
-
-		} else if (actionPhase == ActionPhase.GAME_OVER) {
-			embed.addField("Score Card", generateDisplayScoreCard(), true);
-			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
-			embed.setFooter("Game over! " + getGameOverMessage(), null);
-		}
 	}
 
 	private boolean checkFullHouse() {
@@ -176,14 +139,6 @@ public class YahtzeeGame extends Game {
 		int points = checkJoker() ? getJokerPoints(category) : getPoints(category);
 		categoryPoints[category.ordinal()] = points;
 		categoryScored[category.ordinal()] = true;
-
-		if (isGameOver()) {
-			actionPhase = ActionPhase.GAME_OVER;
-			savePlayerScore();
-
-		} else {
-			startRollDicePhase();
-		}
 	}
 
 	private int[] generateBonusPoints() {
@@ -384,6 +339,11 @@ public class YahtzeeGame extends Game {
 		throw new InternalError();
 	}
 
+	@Override
+	protected String getTitle() {
+		return "Yahtzee!";
+	}
+
 	public int getTotalScore() {
 		return Arrays.stream(categoryPoints).sum() + upperBonusPoints + yahtzeeBonusPoints;
 	}
@@ -392,7 +352,6 @@ public class YahtzeeGame extends Game {
 		return Arrays.stream(categoryPoints).limit(6).sum();
 	}
 
-	@Override
 	public boolean isGameOver() {
 		for (boolean scored : categoryScored) {
 			if (!scored) {
@@ -400,60 +359,6 @@ public class YahtzeeGame extends Game {
 			}
 		}
 		return true;
-	}
-
-	private void playerStart(Member player) {
-		this.player = player;
-		startRollDicePhase();
-	}
-
-	@Override
-	public void registerActions(ActionRegistry registry) {
-		if (actionPhase == ActionPhase.HOTSEAT) {
-			registry.addAction(Emojis.GAME_DIE, p -> {
-				playerStart(p);
-			});
-
-		} else if (actionPhase == ActionPhase.ROLL_DICE) {
-			registry.addExclusiveAction(player, Emojis.BLOCK_1, p -> toggleLockDice(0));
-			registry.addExclusiveAction(player, Emojis.BLOCK_2, p -> toggleLockDice(1));
-			registry.addExclusiveAction(player, Emojis.BLOCK_3, p -> toggleLockDice(2));
-			registry.addExclusiveAction(player, Emojis.BLOCK_4, p -> toggleLockDice(3));
-			registry.addExclusiveAction(player, Emojis.BLOCK_5, p -> toggleLockDice(4));
-			registry.addExclusiveAction(player, Emojis.GAME_DIE, p -> rollDice());
-
-		} else if (actionPhase == ActionPhase.CHOOSE_CATEGORY) {
-			if (checkJoker()) {// Forced Joker Rules
-				if (!checkJokerUpperScored()) {
-					Category category = Category.values()[rolledDice[0] - 1];
-					registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
-				} else if (checkLowerAvailable()) {
-					for (int i = 6; i < categoryPoints.length; i++) {
-						final Category category = Category.values()[i];
-						if (categoryScored[i]) {
-							continue;
-						}
-						registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
-					}
-				} else {
-					for (int i = 0; i < 6; i++) {
-						final Category category = Category.values()[i];
-						if (categoryScored[i]) {
-							continue;
-						}
-						registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
-					}
-				}
-			} else {
-				for (int i = 0; i < categoryPoints.length; i++) {
-					final Category category = Category.values()[i];
-					if (categoryScored[i]) {
-						continue;
-					}
-					registry.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
-				}
-			}
-		}
 	}
 
 	private void rollDice() {
@@ -464,9 +369,103 @@ public class YahtzeeGame extends Game {
 		}
 
 		rollCount++;
+	}
 
-		if (rollCount == 3) {
-			actionPhase = ActionPhase.CHOOSE_CATEGORY;
+	@Override
+	public void run() {
+		runHotseatPhase();
+		while (!isGameOver()) {
+			runRollingPhase();
+			runChoosingPhase();
+		}
+		runGameOverPhase();
+	}
+
+	private void runChoosingPhase() {
+		Display<?> display = display(embed -> {
+			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+			embed.addField("Score Card", generateDisplayScoreCard(), true);
+			embed.addField("Choose Scoring", generateDisplayChoices(), true);
+			embed.addField("Rolled Dice", generateDisplayRolledDice(false), false);
+			embed.setFooter("Press the matching symbol to choose a category.", null);
+		});
+
+		if (checkJoker()) {// Forced Joker Rules
+			if (!checkJokerUpperScored()) {
+				Category category = Category.values()[rolledDice[0] - 1];
+				display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+			} else if (checkLowerAvailable()) {
+				for (int i = 6; i < categoryPoints.length; i++) {
+					final Category category = Category.values()[i];
+					if (categoryScored[i]) {
+						continue;
+					}
+					display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				}
+			} else {
+				for (int i = 0; i < 6; i++) {
+					final Category category = Category.values()[i];
+					if (categoryScored[i]) {
+						continue;
+					}
+					display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				}
+			}
+		} else {
+			for (int i = 0; i < categoryPoints.length; i++) {
+				final Category category = Category.values()[i];
+				if (categoryScored[i]) {
+					continue;
+				}
+				display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+			}
+		}
+
+		display.send();
+	}
+
+	private void runGameOverPhase() {
+		savePlayerScore();
+
+		display(embed -> {
+			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+			embed.addField("Score Card", generateDisplayScoreCard(), true);
+			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
+			embed.setFooter("Game over! " + getGameOverMessage(), null);
+		}).send();
+	}
+
+	private void runHotseatPhase() {
+		display(embed -> {
+			embed.setDescription("This is a singleplayer game. Press the " + Emojis.GAME_DIE + " to start!");
+			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
+
+		}).addAction(Emojis.GAME_DIE, p -> {
+			this.player = p;
+
+		}).send();
+	}
+
+	private void runRollingPhase() {
+		rollCount = 0;
+		Arrays.fill(lockedDice, false);
+		rollDice();
+
+		while (rollCount < 3) {
+			display(embed -> {
+				embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+				embed.addField("Score Card", generateDisplayScoreCard(), false);
+				embed.addField("Rolled Dice", generateDisplayRolledDice(true), true);
+				embed.addField("Rolls", "**" + (3 - rollCount) + "** Remaining", true);
+				embed.setFooter("Press 1-5 to lock the dice, press dice to roll again.", null);
+			})//
+					.addExclusiveAction(player, Emojis.BLOCK_1, p -> toggleLockDice(0))//
+					.addExclusiveAction(player, Emojis.BLOCK_2, p -> toggleLockDice(1))//
+					.addExclusiveAction(player, Emojis.BLOCK_3, p -> toggleLockDice(2))//
+					.addExclusiveAction(player, Emojis.BLOCK_4, p -> toggleLockDice(3))//
+					.addExclusiveAction(player, Emojis.BLOCK_5, p -> toggleLockDice(4))//
+					.addExclusiveAction(player, Emojis.GAME_DIE, p -> rollDice())//
+					.send();
 		}
 	}
 
@@ -477,13 +476,6 @@ public class YahtzeeGame extends Game {
 		playerSave.put(JSONKEY_PLAYCOUNT, playerSave.optInt(JSONKEY_PLAYCOUNT, 0) + 1);
 		System.out.println(playerSave.toString(2));
 		setGlobalSave(player, Optional.of(playerSave));
-	}
-
-	private void startRollDicePhase() {
-		actionPhase = ActionPhase.ROLL_DICE;
-		rollCount = 0;
-		Arrays.fill(lockedDice, false);
-		rollDice();
 	}
 
 	private void toggleLockDice(int dice) {

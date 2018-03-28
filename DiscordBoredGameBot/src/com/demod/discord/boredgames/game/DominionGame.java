@@ -16,20 +16,16 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.demod.discord.boredgames.game.DominionCards.CardType;
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Multiset;
 
-import net.dv8tion.jda.core.EmbedBuilder;
 import net.dv8tion.jda.core.entities.Member;
 
 public class DominionGame extends Game {
-
-	private enum ActionPhase {
-		HOTSEAT, PLAY_ACTIONS, PLAY_TREASURES, BUY, GAME_OVER
-	}
 
 	public class Player {
 		private final Member member;
@@ -44,6 +40,8 @@ public class DominionGame extends Game {
 		private int actionsAvailable;
 		private int buysAvailable;
 		private int coinsAvailable;
+
+		public boolean skipPhase;
 
 		public Player(Member member) {
 			this.member = member;
@@ -215,10 +213,10 @@ public class DominionGame extends Game {
 
 	}
 
+	private boolean hotseat;
 	private final List<Player> players = new ArrayList<>();
 	private final Set<DominionCards> kingdoms = new LinkedHashSet<>();
 
-	private ActionPhase phase = ActionPhase.HOTSEAT;
 	private Optional<Player> winner = Optional.empty();
 
 	private int turn;
@@ -249,107 +247,12 @@ public class DominionGame extends Game {
 		}
 	}
 
-	@Override
-	public void buildDisplay(EmbedBuilder embed) {
-		embed.setAuthor("Dominion Card Game");
-
-		switch (phase) {
-		case HOTSEAT:
-			embed.setDescription("This is a 2-4 player game, and can take some time to play.\n\n"
-					+ "Try to build a deck with the most victory points when the game ends.  "
-					+ "You play action cards that help you (or hurt others) and buy more cards to build the best deck to win.\n"
-					+ "The game is over when any 3 supplies of cards run out, or when the highest victory card (Province) supply runs out.\n\n"
-					+ "Press the " + Emojis.HAND_SPLAYED + " to join, press the " + Emojis.SHUFFLE
-					+ " to generate a new set of kingdoms, press the " + Emojis.QUESTION
-					+ " for details, and press the " + Emojis.GAME_DIE + " to begin the game!");
-
-			if (!players.isEmpty()) {
-				embed.addField("Players", players.stream().map(Player::getMember).map(Member::getEffectiveName)
-						.collect(Collectors.joining("\n")), true);
-			}
-
-			embed.addField("Kingdoms", generateDisplayCardList(kingdoms), false);
-			break;
-
-		case PLAY_ACTIONS:
-			embed.setTitle("Action Phase - Play any Action Cards");
-			embed.setDescription(
-					"Play action cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
-							+ Emojis.TRACK_NEXT + ".");
-
-			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-			embed.addField("Current Player", generatePlayerStats(currentPlayer(), true), false);
-
-			for (DominionCards card : getPlayActionChoices()) {
-				embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
-			}
-			break;
-
-		case PLAY_TREASURES:
-			embed.setTitle("Treasure Phase - Play any Treasure Cards");
-			embed.setDescription(
-					"Play treasure cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the treasure phase by pressing "
-							+ Emojis.TRACK_NEXT + ".");
-
-			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-			embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
-
-			for (DominionCards card : getPlayTreasureChoices()) {
-				embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
-			}
-			break;
-
-		case BUY:
-			embed.setTitle("Buy Phase - Buy any Supply Cards");
-			embed.setDescription(
-					"Buy cards from the supply if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the buy phase by pressing "
-							+ Emojis.TRACK_NEXT + ".");
-
-			embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-			embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-			embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
-
-			for (DominionCards card : getBuyChoices()) {
-				embed.addField(card.getEmoji() + " Buy " + card.getTitle() + " (Cost: " + card.getCost() + ")",
-						card.getText(), true);
-			}
-
-			System.out.println(supply);
-			break;
-
-		case GAME_OVER:
-			embed.setDescription("Game Over! The winner is **" + winner.get().getMember().getEffectiveName() + "**!");
-
-			for (Player player : players) {
-				embed.addField(
-						player.getMember().getEffectiveName() + " (**" + player.getScore() + "** Victory Points)",
-						generateDisplayDeckBreakdown(player), true);
-			}
-			break;
-		}
-	}
-
 	private void buyChooseCard(DominionCards card) {
 		Player player = currentPlayer();
 		player.buysAvailable--;
 		player.coinsAvailable -= card.getCost();
 		supply.remove(card);
 		player.discard(card);
-
-		checkGameOver();
-		if (isGameOver()) {
-			return;
-		}
-
-		if (!player.canBuyCards()) {
-			endTurn();
-		}
-	}
-
-	private void buyNextPhase() {
-		endTurn();
 	}
 
 	private void checkGameOver() {
@@ -370,7 +273,6 @@ public class DominionGame extends Game {
 				}
 			}
 			winner = Optional.of(bestPlayer);
-			phase = ActionPhase.GAME_OVER;
 		}
 	}
 
@@ -380,8 +282,8 @@ public class DominionGame extends Game {
 
 	private void endTurn() {
 		currentPlayer().cleanup();
+		checkGameOver();
 		turn = (turn + 1) % players.size();
-		startPlayActionsPhase();
 	}
 
 	private String generateDisplayCardList(Collection<DominionCards> cards) {
@@ -434,23 +336,9 @@ public class DominionGame extends Game {
 				.sorted((c1, c2) -> Integer.compare(c1.getCost(), c2.getCost())).collect(Collectors.toList());
 	}
 
-	public void hotseatGameStart(Member player) {
-		if (!players.stream().anyMatch(p -> p.getMember().equals(player))) {
-			return;
-		}
-		initializeGame();
-		turn = 0;
-		startPlayActionsPhase();
-	}
-
-	public void hotseatNewPlayer(Member player) {
-		if (players.size() < 4 && !players.stream().anyMatch(p -> p.getMember().equals(player))) {
-			players.add(new Player(player));
-		}
-	}
-
-	public void hotseatShuffle() {
-		pickKingdoms();
+	@Override
+	protected String getTitle() {
+		return "Dominion Card Game";
 	}
 
 	private void initializeGame() {
@@ -484,7 +372,6 @@ public class DominionGame extends Game {
 		}
 	}
 
-	@Override
 	public boolean isGameOver() {
 		return winner.isPresent();
 	}
@@ -502,100 +389,185 @@ public class DominionGame extends Game {
 		player.actionsAvailable--;
 		player.removeFromHand(card);
 		player.playCard(card);
-
-		if (!player.canPlayActions()) {
-			startPlayTreasuresPhase();
-		}
-	}
-
-	private void playActionsNextPhase() {
-		startPlayTreasuresPhase();
 	}
 
 	private void playTreasuresChooseCard(DominionCards card) {
 		Player player = currentPlayer();
 		player.removeFromHand(card);
 		player.playCard(card);
-
-		if (!player.canPlayTreasures()) {
-			startBuyPhase();
-		}
 	}
 
-	private void playTreasuresNextPhase() {
-		startBuyPhase();
+	private void registerCardChoices(Display<?> display, Player player, LinkedHashSet<DominionCards> playActionChoices,
+			Consumer<DominionCards> action) {
+		for (DominionCards card : playActionChoices) {
+			display.addExclusiveAction(player.getMember(), card.getEmoji(), p -> action.accept(card));
+		}
 	}
 
 	@Override
-	public void registerActions(ActionRegistry registry) {
-		switch (phase) {
-		case HOTSEAT:
-			if (players.size() < 4) {
-				registry.addAction(Emojis.HAND_SPLAYED, this::hotseatNewPlayer);
-			}
-			registry.addAction(Emojis.SHUFFLE, this::hotseatShuffle);
-			if (players.size() >= 2) {
-				registry.addAction(Emojis.GAME_DIE, this::hotseatGameStart);
-			}
-			break;
-
-		case PLAY_ACTIONS:
-			Member currentPlayer = currentPlayer().getMember();
-			registerCardChoices(registry, currentPlayer, getPlayActionChoices(), this::playActionsChooseCard);
-			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::playActionsNextPhase);
-			break;
-
-		case PLAY_TREASURES:
-			currentPlayer = currentPlayer().getMember();
-			registerCardChoices(registry, currentPlayer, getPlayTreasureChoices(), this::playTreasuresChooseCard);
-			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::playTreasuresNextPhase);
-			break;
-
-		case BUY:
-			currentPlayer = currentPlayer().getMember();
-			registerCardChoices(registry, currentPlayer, getBuyChoices(), this::buyChooseCard);
-			registry.addExclusiveAction(currentPlayer, Emojis.TRACK_NEXT, this::buyNextPhase);
-			break;
-
-		case GAME_OVER:
-			break;
-		}
-	}
-
-	private void registerCardChoices(ActionRegistry registry, Member member,
-			LinkedHashSet<DominionCards> playActionChoices, Consumer<DominionCards> action) {
-		for (DominionCards card : playActionChoices) {
-			registry.addExclusiveAction(member, card.getEmoji(), () -> action.accept(card));
-		}
-	}
-
-	private void startBuyPhase() {
-		if (currentPlayer().canBuyCards()) {
-			phase = ActionPhase.BUY;
-		} else {
+	public void run() {
+		runHotseatPhase();
+		while (!isGameOver()) {
+			Player player = currentPlayer();
+			startTurn(player);
+			runPlayActionsPhase(player);
+			runPlayTreasuresPhase(player);
+			runBuyPhase(player);
 			endTurn();
 		}
+		runGameOverPhase();
 	}
 
-	private void startPlayActionsPhase() {
-		Player player = currentPlayer();
+	private void runBuyPhase(Player player) {
+		player.skipPhase = false;
+
+		while (player.canBuyCards() && !player.skipPhase) {
+			Display<?> display = display(embed -> {
+				embed.setTitle("Buy Phase - Buy any Supply Cards");
+				embed.setDescription(
+						"Buy cards from the supply if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the buy phase by pressing "
+								+ Emojis.TRACK_NEXT + ".");
+
+				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+				embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+
+				for (DominionCards card : getBuyChoices()) {
+					embed.addField(
+							card.getEmoji() + " Buy " + card.getTitle()
+									+ (card.getCost() == 0 ? " (Free)" : (" (Cost " + card.getCost() + ")")),
+							card.getText(), true);
+				}
+			});
+
+			registerCardChoices(display, player, getBuyChoices(), this::buyChooseCard);
+			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+				player.skipPhase = true;
+			});
+
+			display.send();
+		}
+	}
+
+	private void runGameOverPhase() {
+		display(embed -> {
+			embed.setDescription("Game Over! The winner is **" + winner.get().getMember().getEffectiveName() + "**!");
+
+			for (Player player : players) {
+				embed.addField(
+						player.getMember().getEffectiveName() + "\n(**" + player.getScore() + "** Victory Points)",
+						generateDisplayDeckBreakdown(player), true);
+			}
+		}).send();
+	}
+
+	private void runHotseatPhase() {
+		hotseat = true;
+		while (hotseat) {
+			List<Member> playerMembers = players.stream().map(Player::getMember).collect(Collectors.toList());
+
+			Display<?> display = display(embed -> {
+				embed.setDescription("This is a 2-4 player game, and can take some time to play.\n\n"
+						+ "Try to build a deck with the most victory points when the game ends.  "
+						+ "You play action cards that help you (or hurt others) and buy more cards to build the best deck to win.\n"
+						+ "The game is over when any 3 supplies of cards run out, or when the highest victory card (Province) supply runs out.\n\n"
+						+ "Press the " + Emojis.HAND_SPLAYED + " to join, press the " + Emojis.SHUFFLE
+						+ " to generate a new set of kingdoms, press the " + Emojis.QUESTION
+						+ " for details, and press the " + Emojis.GAME_DIE + " to begin the game!");
+
+				if (!players.isEmpty()) {
+					embed.addField("Players",
+							playerMembers.stream().map(Member::getEffectiveName).collect(Collectors.joining("\n")),
+							true);
+				}
+
+				embed.addField("Kingdoms", generateDisplayCardList(kingdoms), false);
+			});
+
+			if (players.size() < 4) {
+				display.addAction(Emojis.HAND_SPLAYED, p -> {
+					if (players.size() < 4 && !players.stream().anyMatch(p2 -> p2.getMember().equals(p))) {
+						players.add(new Player(p));
+					}
+				});
+			}
+			display.addExclusiveAction(playerMembers, Emojis.SHUFFLE, p -> {
+				pickKingdoms();
+			});
+			if (players.size() >= 2) {
+				display.addExclusiveAction(playerMembers, Emojis.GAME_DIE, p -> {
+					hotseat = false;
+				});
+			}
+
+			display.send();
+		}
+
+		initializeGame();
+		turn = 0;
+	}
+
+	private void runPlayActionsPhase(Player player) {
+		player.skipPhase = false;
+
+		while (player.canPlayActions() && !player.skipPhase) {
+			Display<?> display = display(embed -> {
+				embed.setTitle("Action Phase - Play any Action Cards");
+				embed.setDescription(
+						"Play action cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
+								+ Emojis.TRACK_NEXT + ".");
+
+				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+				embed.addField("Current Player", generatePlayerStats(currentPlayer(), true), false);
+
+				for (DominionCards card : getPlayActionChoices()) {
+					embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
+				}
+			});
+
+			registerCardChoices(display, player, getPlayActionChoices(), this::playActionsChooseCard);
+			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+				player.skipPhase = true;
+			});
+
+			display.send();
+		}
+	}
+
+	private void runPlayTreasuresPhase(Player player) {
+		player.skipPhase = false;
+		autoPlayTreasures();
+
+		while (player.canPlayTreasures() && !player.skipPhase) {
+			Display<?> display = display(embed -> {
+				embed.setTitle("Treasure Phase - Play any Treasure Cards");
+				embed.setDescription(
+						"Play treasure cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the treasure phase by pressing "
+								+ Emojis.TRACK_NEXT + ".");
+
+				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
+				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
+				embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+
+				for (DominionCards card : getPlayTreasureChoices()) {
+					embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
+				}
+			});
+
+			registerCardChoices(display, player, getPlayTreasureChoices(), this::playTreasuresChooseCard);
+			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+				player.skipPhase = true;
+			});
+
+			display.send();
+		}
+	}
+
+	private void startTurn(Player player) {
 		player.actionsAvailable = 1;
 		player.buysAvailable = 1;
 		player.coinsAvailable = 0;
-		if (currentPlayer().canPlayActions()) {
-			phase = ActionPhase.PLAY_ACTIONS;
-		} else {
-			startPlayTreasuresPhase();
-		}
-	}
-
-	private void startPlayTreasuresPhase() {
-		autoPlayTreasures();
-		if (currentPlayer().canPlayTreasures()) {
-			phase = ActionPhase.PLAY_TREASURES;
-		} else {
-			startBuyPhase();
-		}
 	}
 
 }

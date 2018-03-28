@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 
-import net.dv8tion.jda.core.EmbedBuilder;
 import net.dv8tion.jda.core.entities.Member;
 
 public class Connect4Game extends Game {
@@ -19,7 +19,7 @@ public class Connect4Game extends Game {
 
 	private static final int IN_A_ROW = 4;
 
-	private boolean hotseat = true;
+	private boolean hotseat;
 	private String[] emojiPlayerSet;
 	private int columns = 7;
 	private int rows = 6;
@@ -40,10 +40,6 @@ public class Connect4Game extends Game {
 
 	public void applyMove(Member player, int column) {
 		int turn = (lastTurn + 1) % players.size();
-		Member playerTurn = players.get(turn);
-		if (!player.equals(playerTurn)) {
-			return;
-		}
 
 		Tile tile = Tile.values()[1 + turn];
 		for (int i = rows - 1; i >= 0; i--) {
@@ -57,58 +53,6 @@ public class Connect4Game extends Game {
 			}
 		}
 		throw new InternalError("Illegal Game State!");
-	}
-
-	@Override
-	public void buildDisplay(EmbedBuilder embed) {
-		embed.setAuthor("Connect Four!");
-
-		if (hotseat) {
-			embed.setDescription(
-					"This is a 2-4 player game. Try to create a 4 in a row chain of your player token to win! Press the "
-							+ Emojis.HAND_SPLAYED + " to join, and press the " + Emojis.GAME_DIE
-							+ " to begin the game!");
-
-			if (!players.isEmpty()) {
-				embed.addField("Players",
-						IntStream.range(0, players.size())
-								.mapToObj(i -> emojiPlayerSet[i] + " " + players.get(i).getEffectiveName())
-								.collect(Collectors.joining("\n")),
-						true);
-			}
-
-		} else if (isGameOver()) {
-			if (emojiPlayerSet[0].equals(Emojis.QUESTION)) {
-				emojiPlayerSet = Emojis.getRandomPlayerSet();
-			}
-			if (winner != -1) {
-				embed.addField(players.get(winner).getEffectiveName() + " Wins!",
-						IntStream.range(0, 4).mapToObj(i -> emojiPlayerSet[winner]).collect(Collectors.joining()),
-						true);
-			} else {
-				embed.addField("It's a Draw!", IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
-						.collect(Collectors.joining()), true);
-			}
-
-			embed.setDescription(generateTilesEmoji());
-
-			embed.setFooter("This game has ended.", null);
-
-		} else {
-			int turn = (lastTurn + 1) % players.size();
-			String message = IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
-					.collect(Collectors.joining())
-					+ "\n"
-					+ IntStream.range(0, players.size())
-							.mapToObj(i -> (turn == i) ? Emojis.ARROW_UP : Emojis.SMALL_BLACK_SQUARE)
-							.collect(Collectors.joining());
-			embed.addField(players.get(turn).getEffectiveName() + "'s Turn", message, true);
-
-			embed.setDescription(generateTilesEmoji());
-
-			embed.setFooter("Press the column number to place your piece.", null);
-		}
-
 	}
 
 	private boolean canMove(int column) {
@@ -202,14 +146,12 @@ public class Connect4Game extends Game {
 		return sb.toString();
 	}
 
-	public void hotseatGameStart(Member player) {
-		if (!players.contains(player)) {
-			return;
-		}
-		hotseat = false;
+	@Override
+	protected String getTitle() {
+		return "Connect Four!";
 	}
 
-	public void hotseatNewPlayer(Member player) {
+	private void hotseatNewPlayer(Member player) {
 		if (players.size() < 4 && !players.contains(player)) {
 			players.add(player);
 
@@ -227,7 +169,6 @@ public class Connect4Game extends Game {
 		}
 	}
 
-	@Override
 	public boolean isGameOver() {
 		if (winner != -1) {
 			return true;
@@ -241,22 +182,93 @@ public class Connect4Game extends Game {
 	}
 
 	@Override
-	public void registerActions(ActionRegistry registry) {
-		if (hotseat) {
-			if (players.size() < 4) {
-				registry.addAction(Emojis.HAND_SPLAYED, this::hotseatNewPlayer);
+	public void run() {
+		runHotseatPhase();
+		runPlayPhase();
+		runGameOverPhase();
+	}
+
+	private void runGameOverPhase() {
+		display(embed -> {
+			if (emojiPlayerSet[0].equals(Emojis.QUESTION)) {
+				emojiPlayerSet = Emojis.getRandomPlayerSet();
 			}
-			if (players.size() >= 2) {
-				registry.addAction(Emojis.GAME_DIE, this::hotseatGameStart);
+			if (winner != -1) {
+				embed.addField(players.get(winner).getEffectiveName() + " Wins!",
+						IntStream.range(0, 4).mapToObj(i -> emojiPlayerSet[winner]).collect(Collectors.joining()),
+						true);
+			} else {
+				embed.addField("It's a Draw!", IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
+						.collect(Collectors.joining()), true);
 			}
 
-		} else {
+			embed.setDescription(generateTilesEmoji());
+
+			embed.setFooter("This game has ended.", null);
+		}).send();
+	}
+
+	private void runHotseatPhase() {
+		hotseat = true;
+		while (hotseat) {
+			Display<Boolean> display = display(embed -> {
+				embed.setDescription(
+						"This is a 2-4 player game. Try to create a 4 in a row chain of your player token to win! Press the "
+								+ Emojis.HAND_SPLAYED + " to join, and press the " + Emojis.GAME_DIE
+								+ " to begin the game!");
+
+				if (!players.isEmpty()) {
+					embed.addField("Players",
+							IntStream.range(0, players.size())
+									.mapToObj(i -> emojiPlayerSet[i] + " " + players.get(i).getEffectiveName())
+									.collect(Collectors.joining("\n")),
+							true);
+				}
+			});
+
+			if (players.size() < 4) {
+				display.addAction(Emojis.HAND_SPLAYED, player -> {
+					System.out.println("???");
+					hotseatNewPlayer(player);
+				});
+			}
+			if (players.size() >= 2) {
+				display.addExclusiveAction(players, Emojis.GAME_DIE, player -> {
+					hotseat = false;
+				});
+			}
+
+			display.send();
+		}
+	}
+
+	private void runPlayPhase() {
+		while (!isGameOver()) {
+			int turn = (lastTurn + 1) % players.size();
+			Member player = players.get(turn);
+
+			Display<?> display = display(embed -> {
+				String message = IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
+						.collect(Collectors.joining())
+						+ "\n"
+						+ IntStream.range(0, players.size())
+								.mapToObj(i -> (turn == i) ? Emojis.ARROW_UP : Emojis.SMALL_BLACK_SQUARE)
+								.collect(Collectors.joining());
+				embed.addField(player.getEffectiveName() + "'s Turn", message, true);
+
+				embed.setDescription(generateTilesEmoji());
+
+				embed.setFooter("Press the column number to place your piece.", null);
+			});
+
 			for (int i = 0; i < columns; i++) {
 				final int column = i;
 				if (canMove(column)) {
-					registry.addAction(Emojis.BLOCK_NUMBER[column + 1], (player) -> applyMove(player, column));
+					display.addExclusiveAction(player, Emojis.BLOCK_NUMBER[column + 1], p -> applyMove(p, column));
 				}
 			}
+
+			display.send();
 		}
 	}
 }

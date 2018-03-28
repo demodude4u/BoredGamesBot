@@ -5,60 +5,56 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import org.json.JSONObject;
 
 import com.demod.dcba.GuildSettings;
 
 import net.dv8tion.jda.core.EmbedBuilder;
-import net.dv8tion.jda.core.entities.Guild;
 import net.dv8tion.jda.core.entities.Member;
+import net.dv8tion.jda.core.entities.Message;
+import net.dv8tion.jda.core.entities.MessageChannel;
+import net.dv8tion.jda.core.entities.TextChannel;
 
 public abstract class Game {
-	@FunctionalInterface
-	public interface Action {
-		void apply(Member player);
-	}
-
-	@FunctionalInterface
-	public interface ActionRegistry {
-		void addAction(String emoji, Action action);
-
-		default void addAction(String emoji, PlayerlessAction action) {
-			addAction(emoji, (Action) action);
-		}
-
-		default void addExclusiveAction(Member player, String emoji, Action action) {
-			addAction(emoji, p -> {
-				if (p.equals(player)) {
-					action.apply(p);
-				}
-			});
-		}
-
-		default void addExclusiveAction(Member player, String emoji, PlayerlessAction action) {
-			addExclusiveAction(player, emoji, (Action) action);
-		}
-	}
-
-	@FunctionalInterface
-	public interface PlayerlessAction extends Action {
-		void apply();
-
-		@Override
-		default void apply(Member player) {
-			apply();
-		}
-	}
 
 	private static final String GROUP_GLOBAL = "__GLOBAL__";
 
 	private static final String JSONKEY_GUILD_GAMES = "games";
 	private static final String JSONKEY_GAME_PLAYERSAVES = "player-saves";
 
-	private Guild guild;
+	private int id = -1;
+	private TextChannel channel;
+	private DiscordBoredGameBot bot;
+	private Thread thread;
 
-	public abstract void buildDisplay(EmbedBuilder embed);
+	private final Map<String, Message> messages = new ConcurrentHashMap<>();
+
+	public <T> Display<T> display(Consumer<EmbedBuilder> builder) {
+		Display<T> display = display(channel);
+		builder.accept(display.getBuilder());
+		return display;
+	}
+
+	public <T> Display<T> display(Member player, Consumer<EmbedBuilder> builder) {
+		Display<T> display = display(player.getUser().openPrivateChannel().complete());
+		builder.accept(display.getBuilder());
+		return display;
+	}
+
+	private <T> Display<T> display(MessageChannel channel) {
+		Display<T> display = new Display<T>(d -> {
+			String messageKey = channel.getId();
+			Message message = messages.get(messageKey);
+			Entry<Message, T> entry = bot.waitForDisplay(d, channel, Optional.ofNullable(message));
+			messages.put(messageKey, entry.getKey());
+			return entry.getValue();
+		});
+		display.getBuilder().setTitle(getTitle());
+		return display;
+	}
 
 	public Optional<JSONObject> getGlobalSave(Member player) {
 		return getGroupSave(GROUP_GLOBAL, player);
@@ -83,7 +79,7 @@ public abstract class Game {
 					Map<Member, JSONObject> ret = new LinkedHashMap<>();
 					JSONObject playerSavesJson = gameJson.getJSONObject(JSONKEY_GAME_PLAYERSAVES);
 					for (String userId : playerSavesJson.keySet()) {
-						Member player = guild.getMemberById(userId);
+						Member player = channel.getGuild().getMemberById(userId);
 						JSONObject playerSave = playerSavesJson.getJSONObject(userId);
 						if (player != null) {
 							ret.put(player, playerSave);
@@ -96,28 +92,32 @@ public abstract class Game {
 		return new HashMap<>();
 	}
 
-	public Guild getGuild() {
-		return guild;
-	}
-
 	public Optional<JSONObject> getGuildSave(Member player) {
-		return getGroupSave(guild.getId(), player);
+		return getGroupSave(channel.getGuild().getId(), player);
 	}
 
 	public Map<Member, JSONObject> getGuildSaves() {
-		return getGroupSaves(guild.getId());
+		return getGroupSaves(channel.getGuild().getId());
 	}
 
-	public abstract boolean isGameOver();
+	int getId() {
+		return id;
+	}
 
-	public abstract void registerActions(ActionRegistry registry);
+	Thread getThread() {
+		return thread;
+	}
+
+	protected abstract String getTitle();
+
+	public abstract void run();
 
 	public void setGlobalSave(Member player, Optional<JSONObject> playerSave) {
 		setGroupSave(GROUP_GLOBAL, player, playerSave);
 	}
 
 	public void setGlobalSaves(Map<Member, JSONObject> playerSaves) {
-		setGroupSaves(guild.getId(), playerSaves);
+		setGroupSaves(channel.getGuild().getId(), playerSaves);
 	}
 
 	public void setGroupSave(String group, Member player, Optional<JSONObject> playerSave) {
@@ -164,15 +164,23 @@ public abstract class Game {
 		GuildSettings.save(group, guildJson);
 	}
 
-	void setGuild(Guild guild) {
-		this.guild = guild;
-	}
-
 	public void setGuildSave(Member player, Optional<JSONObject> playerSave) {
-		setGroupSave(guild.getId(), player, playerSave);
+		setGroupSave(channel.getGuild().getId(), player, playerSave);
 	}
 
 	public void setGuildSaves(Map<Member, JSONObject> playerSaves) {
-		setGroupSaves(guild.getId(), playerSaves);
+		setGroupSaves(channel.getGuild().getId(), playerSaves);
 	}
+
+	void setId(int id) {
+		this.id = id;
+	}
+
+	void setInternalInfo(DiscordBoredGameBot bot, TextChannel channel, int id, Thread thread) {
+		this.bot = bot;
+		this.channel = channel;
+		this.id = id;
+		this.thread = thread;
+	}
+
 }
