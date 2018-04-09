@@ -3,11 +3,13 @@ package com.demod.discord.boredgames.game;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Random;
@@ -19,10 +21,12 @@ import java.util.stream.Collectors;
 import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
-import com.demod.discord.boredgames.game.DominionCards.CardType;
+import com.demod.discord.boredgames.game.DominionCard.CardType;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Multiset;
 
+import net.dv8tion.jda.core.EmbedBuilder;
 import net.dv8tion.jda.core.entities.Member;
 
 public class DominionGame extends Game {
@@ -30,12 +34,12 @@ public class DominionGame extends Game {
 	public class Player {
 		private final Member member;
 
-		private final List<DominionCards> deck = new ArrayList<>();
-		private final List<DominionCards> discard = new ArrayList<>();
-		private final List<DominionCards> hand = new ArrayList<>();
-		private final List<DominionCards> play = new ArrayList<>();
+		private final List<DominionCard> deck = new ArrayList<>();
+		private final List<DominionCard> discard = new ArrayList<>();
+		private final List<DominionCard> hand = new ArrayList<>();
+		private final List<DominionCard> play = new ArrayList<>();
 
-		private final List<Entry<Predicate<DominionCards>, Runnable>> firstPlayConditions = new ArrayList<>();
+		private final List<Entry<Predicate<DominionCard>, Runnable>> firstPlayConditions = new ArrayList<>();
 
 		private int actionsAvailable;
 		private int buysAvailable;
@@ -59,7 +63,7 @@ public class DominionGame extends Game {
 			coinsAvailable += count;
 		}
 
-		public void addFirstPlayCondition(Predicate<DominionCards> condition, Runnable action) {
+		public void addFirstPlayCondition(Predicate<DominionCard> condition, Runnable action) {
 			firstPlayConditions.add(new SimpleImmutableEntry<>(condition, action));
 		}
 
@@ -68,11 +72,27 @@ public class DominionGame extends Game {
 		}
 
 		private boolean canPlayActions() {
-			return actionsAvailable > 0 && hand.stream().anyMatch(c -> c.getType() == CardType.ACTION);
+			return actionsAvailable > 0 && hand.stream().anyMatch(c -> c.getType() == CardType.Action);
 		}
 
 		private boolean canPlayTreasures() {
-			return hand.stream().anyMatch(c -> c.getType() == CardType.TREASURE);
+			return hand.stream().anyMatch(c -> c.getType() == CardType.Treasure);
+		}
+
+		public boolean chooseActionOrSkip(String actionEmoji, String actionMessage, String message) {
+			return requestAction(this, ImmutableMap.of(actionEmoji, actionMessage), message, true, false).isPresent();
+		}
+
+		public DominionCard chooseCard(List<DominionCard> choices, String message) {
+			return requestChooseCard(this, choices, message, false, false).get();
+		}
+
+		public boolean chooseCardOrSkip(DominionCard card, String message) {
+			return requestChooseCard(this, Arrays.asList(card), message, true, false).isPresent();
+		}
+
+		public Optional<DominionCard> chooseCardOrSkip(List<DominionCard> choices, String message) {
+			return requestChooseCard(this, choices, message, true, false);
 		}
 
 		public void cleanup() {
@@ -85,7 +105,7 @@ public class DominionGame extends Game {
 			firstPlayConditions.clear();
 
 			for (int i = 0; i < 5; i++) {
-				Optional<DominionCards> card = takeCardFromDeck();
+				Optional<DominionCard> card = takeFromDeck();
 				if (!card.isPresent()) {
 					break;
 				}
@@ -93,13 +113,13 @@ public class DominionGame extends Game {
 			}
 		}
 
-		public void discard(DominionCards card) {
+		public void discard(DominionCard card) {
 			discard.add(card);
 		}
 
 		public void drawCards(int count) {
 			for (int i = 0; i < count; i++) {
-				Optional<DominionCards> card = takeCardFromDeck();
+				Optional<DominionCard> card = takeFromDeck();
 				if (!card.isPresent()) {
 					break;
 				}
@@ -107,7 +127,7 @@ public class DominionGame extends Game {
 			}
 		}
 
-		public void gainCard(DominionCards card) {
+		public void gain(DominionCard card) {
 			discard.add(card);
 		}
 
@@ -122,8 +142,35 @@ public class DominionGame extends Game {
 			hand.clear();
 		}
 
+		public List<Player> getAllPlayers() {
+			List<Player> playerOrder = new ArrayList<>(getPlayerCount());
+			playerOrder.add(this);
+			playerOrder.addAll(getOtherPlayers());
+			return playerOrder;
+		}
+
+		public List<DominionCard> getDeck() {
+			return deck;
+		}
+
+		public List<DominionCard> getDiscard() {
+			return discard;
+		}
+
+		public int getEmptySupplyPileCount() {
+			return initialSupplyCount - supply.entrySet().size();
+		}
+
+		public List<DominionCard> getHand() {
+			return hand;
+		}
+
 		public Member getMember() {
 			return member;
+		}
+
+		public String getName() {
+			return member.getEffectiveName();
 		}
 
 		public List<Player> getOtherPlayers() {
@@ -135,13 +182,29 @@ public class DominionGame extends Game {
 			return otherPlayers;
 		}
 
+		public int getPlayerCount() {
+			return players.size();
+		}
+
 		public int getScore() {
-			return deck.stream().filter(c -> c.getType() == CardType.TREASURE)
-					.mapToInt(c -> CardType.TREASURE.getInteraction(c).getCoinValue(this)).sum();
+			return deck.stream().filter(c -> c.getType() == CardType.Treasure)
+					.mapToInt(c -> CardType.Treasure.getInteraction(c).getCoinValue(this)).sum();
+		}
+
+		public List<DominionCard> getSupplyCardsAtMostCost(int coins) {
+			return DominionGame.this.getSupplyCardsAtMostCost(coins);
 		}
 
 		public int getTotalCardCount() {
 			return deck.size() + discard.size() + hand.size() + play.size();
+		}
+
+		public DominionCard hiddenChooseCard(List<DominionCard> choices, String message) {
+			return requestChooseCard(this, choices, message, false, true).get();
+		}
+
+		public Optional<DominionCard> hiddenChooseCardOrSkip(List<DominionCard> choices, String message) {
+			return requestChooseCard(this, choices, message, true, true);
 		}
 
 		public void initializeGame() {
@@ -151,10 +214,10 @@ public class DominionGame extends Game {
 			play.clear();
 
 			for (int i = 0; i < 7; i++) {
-				deck.add(DominionCards.Copper);
+				deck.add(DominionCard.Copper);
 			}
 			for (int i = 0; i < 3; i++) {
-				deck.add(DominionCards.Estate);
+				deck.add(DominionCard.Estate);
 			}
 
 			Collections.shuffle(deck);
@@ -162,15 +225,21 @@ public class DominionGame extends Game {
 			drawCards(5);
 		}
 
-		public void playCard(DominionCards card) {
-			play.add(card);
+		public void play(DominionCard card) {
+			play(card, true);
+		}
 
-			if (card.getType() == CardType.ACTION) {
-				CardType.ACTION.getInteraction(card).onPlay(this);
+		public void play(DominionCard card, boolean putInPlay) {
+			if (putInPlay) {
+				play.add(card);
 			}
 
-			if (card.getType() == CardType.TREASURE) {
-				int coins = CardType.TREASURE.getInteraction(card).getCoinValue(this);
+			if (card.getType() == CardType.Action) {
+				CardType.Action.getInteraction(card).onPlay(this);
+			}
+
+			if (card.getType() == CardType.Treasure) {
+				int coins = CardType.Treasure.getInteraction(card).getCoinValue(this);
 				addCoins(coins);
 			}
 
@@ -184,19 +253,41 @@ public class DominionGame extends Game {
 			});
 		}
 
-		public void putInHand(DominionCards card) {
+		public void putInHand(DominionCard card) {
 			hand.add(card);
 		}
 
-		public boolean removeFromHand(DominionCards card) {
+		public void putOnDeck(DominionCard card) {
+			deck.add(card);
+		}
+
+		public boolean removeFromDiscard(DominionCard card) {
+			return discard.remove(card);
+		}
+
+		public boolean removeFromHand(DominionCard card) {
 			return hand.remove(card);
 		}
 
-		public Optional<DominionCards> revealCardFromDeck() {
-			return takeCardFromDeck();
+		public boolean removeFromPlay(DominionCard card) {
+			int lastIndexOf = play.lastIndexOf(card);
+			if (lastIndexOf != -1) {
+				play.remove(lastIndexOf);
+				return true;
+			} else {
+				return false;
+			}
 		}
 
-		private Optional<DominionCards> takeCardFromDeck() {
+		public void reveal(DominionCard card, String message) {
+			requestReveal(this, Arrays.asList(card), message);
+		}
+
+		public void reveal(List<DominionCard> cards, String message) {
+			requestReveal(this, cards, message);
+		}
+
+		public Optional<DominionCard> takeFromDeck() {
 			if (deck.isEmpty()) {
 				if (discard.isEmpty()) {
 					return Optional.empty();
@@ -211,27 +302,34 @@ public class DominionGame extends Game {
 			return Optional.of(deck.remove(deck.size() - 1));
 		}
 
+		public boolean takeFromSupply(DominionCard card) {
+			return supply.remove(card);
+		}
+
+		public void trash(DominionCard card) {
+			trash.add(card);
+		}
+
 	}
 
 	private boolean hotseat;
 	private final List<Player> players = new ArrayList<>();
-	private final Set<DominionCards> kingdoms = new LinkedHashSet<>();
+	private final Set<DominionCard> kingdoms = new LinkedHashSet<>();
 
 	private Optional<Player> winner = Optional.empty();
 
 	private int turn;
 
-	private final Multiset<DominionCards> supply = LinkedHashMultiset.create();
+	private final Multiset<DominionCard> supply = LinkedHashMultiset.create();
 	private int initialSupplyCount;
-	private final Deque<DominionCards> trash = new ArrayDeque<>();
+	private final Deque<DominionCard> trash = new ArrayDeque<>();
 
 	public DominionGame() {
 		pickKingdoms();
 	}
 
-	private void autoPlayTreasures() {
-		Player player = currentPlayer();
-		List<DominionCards> autoTreasures = player.hand.stream().filter(c -> {
+	private void autoPlayTreasures(Player player) {
+		List<DominionCard> autoTreasures = player.hand.stream().filter(c -> {
 			switch (c) {
 			case Copper:
 			case Silver:
@@ -241,14 +339,13 @@ public class DominionGame extends Game {
 				return false;
 			}
 		}).collect(Collectors.toList());
-		for (DominionCards card : autoTreasures) {
+		for (DominionCard card : autoTreasures) {
 			player.removeFromHand(card);
-			player.playCard(card);
+			player.play(card);
 		}
 	}
 
-	private void buyChooseCard(DominionCards card) {
-		Player player = currentPlayer();
+	private void buyChooseCard(Player player, DominionCard card) {
 		player.buysAvailable--;
 		player.coinsAvailable -= card.getCost();
 		supply.remove(card);
@@ -256,7 +353,7 @@ public class DominionGame extends Game {
 	}
 
 	private void checkGameOver() {
-		if (supply.count(DominionCards.Province) == 0 || supply.entrySet().size() <= initialSupplyCount - 3) {
+		if (supply.count(DominionCard.Province) == 0 || supply.entrySet().size() <= initialSupplyCount - 3) {
 
 			for (Player player : players) {
 				player.gameOver();
@@ -280,22 +377,20 @@ public class DominionGame extends Game {
 		return players.get(turn);
 	}
 
-	private void endTurn() {
-		currentPlayer().cleanup();
-		checkGameOver();
-		turn = (turn + 1) % players.size();
+	private void endTurn(Player player) {
+		player.cleanup();
 	}
 
-	private String generateDisplayCardList(Collection<DominionCards> cards) {
+	private String generateDisplayCardList(Collection<DominionCard> cards) {
 		return cards.stream().map(c -> c.getEmoji() + c.getTitle()).collect(Collectors.joining("\n"));
 	}
 
 	private String generateDisplayDeckBreakdown(Player player) {
 		List<String> lines = new ArrayList<>();
-		Multiset<DominionCards> cardCounts = LinkedHashMultiset.create(player.deck);
-		for (Multiset.Entry<DominionCards> entry : cardCounts.entrySet().stream()
+		Multiset<DominionCard> cardCounts = LinkedHashMultiset.create(player.deck);
+		for (Multiset.Entry<DominionCard> entry : cardCounts.entrySet().stream()
 				.sorted((e1, e2) -> Integer.compare(e2.getCount(), e1.getCount())).collect(Collectors.toList())) {
-			DominionCards card = entry.getElement();
+			DominionCard card = entry.getElement();
 			lines.add("**" + entry.getCount() + "** " + card.getEmoji() + " " + card.getTitle());
 		}
 		return lines.stream().collect(Collectors.joining("\n"));
@@ -304,7 +399,7 @@ public class DominionGame extends Game {
 	private String generatePlayerStats(Player player, boolean showActionsRemaining) {
 		List<String> lines = new ArrayList<>();
 
-		lines.add("Player: **" + currentPlayer().getMember().getEffectiveName() + "**");
+		lines.add("Player: **" + player.getMember().getEffectiveName() + "**");
 
 		if (showActionsRemaining) {
 			lines.add("Actions: **" + player.actionsAvailable + "**");
@@ -317,21 +412,21 @@ public class DominionGame extends Game {
 		return lines.stream().collect(Collectors.joining("\n"));
 	}
 
-	private LinkedHashSet<DominionCards> getBuyChoices() {
-		return new LinkedHashSet<>(getSupplyCardsAtMostCost(currentPlayer().coinsAvailable));
+	private LinkedHashSet<DominionCard> getBuyChoices(Player player) {
+		return new LinkedHashSet<>(getSupplyCardsAtMostCost(player.coinsAvailable));
 	}
 
-	private LinkedHashSet<DominionCards> getPlayActionChoices() {
-		return currentPlayer().hand.stream().filter(c -> c.getType() == CardType.ACTION)
+	private LinkedHashSet<DominionCard> getPlayActionChoices(Player player) {
+		return player.hand.stream().filter(c -> c.getType() == CardType.Action)
 				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
-	private LinkedHashSet<DominionCards> getPlayTreasureChoices() {
-		return currentPlayer().hand.stream().filter(c -> c.getType() == CardType.TREASURE)
+	private LinkedHashSet<DominionCard> getPlayTreasureChoices(Player player) {
+		return player.hand.stream().filter(c -> c.getType() == CardType.Treasure)
 				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
-	public List<DominionCards> getSupplyCardsAtMostCost(int coins) {
+	public List<DominionCard> getSupplyCardsAtMostCost(int coins) {
 		return supply.entrySet().stream().map(Multiset.Entry::getElement).filter(c -> c.getCost() <= coins)
 				.sorted((c1, c2) -> Integer.compare(c1.getCost(), c2.getCost())).collect(Collectors.toList());
 	}
@@ -349,16 +444,16 @@ public class DominionGame extends Game {
 		int curseSize = new int[] { 0, 10, 20, 30 }[players.size() - 1];
 		int copperSize = new int[] { 0, 46, 39, 32 }[players.size() - 1];
 
-		supply.add(DominionCards.Estate, victorySize);
-		supply.add(DominionCards.Duchy, victorySize);
-		supply.add(DominionCards.Province, victorySize);
-		supply.add(DominionCards.Curse, curseSize);
-		supply.add(DominionCards.Copper, copperSize);
-		supply.add(DominionCards.Silver, 40);
-		supply.add(DominionCards.Gold, 30);
+		supply.add(DominionCard.Estate, victorySize);
+		supply.add(DominionCard.Duchy, victorySize);
+		supply.add(DominionCard.Province, victorySize);
+		supply.add(DominionCard.Curse, curseSize);
+		supply.add(DominionCard.Copper, copperSize);
+		supply.add(DominionCard.Silver, 40);
+		supply.add(DominionCard.Gold, 30);
 
-		for (DominionCards card : kingdoms) {
-			if (card.getType() == CardType.VICTORY) {
+		for (DominionCard card : kingdoms) {
+			if (card.getType() == CardType.Victory) {
 				supply.add(card, victorySize);
 			} else {
 				supply.add(card, 10);
@@ -380,28 +475,106 @@ public class DominionGame extends Game {
 		kingdoms.clear();
 		Random rand = new Random();
 		while (kingdoms.size() < 10) {
-			kingdoms.add(DominionCards.kingdoms[rand.nextInt(DominionCards.kingdoms.length)]);
+			kingdoms.add(DominionCard.kingdoms[rand.nextInt(DominionCard.kingdoms.length)]);
 		}
 	}
 
-	private void playActionsChooseCard(DominionCards card) {
-		Player player = currentPlayer();
+	private void playActionsChooseCard(Player player, DominionCard card) {
 		player.actionsAvailable--;
 		player.removeFromHand(card);
-		player.playCard(card);
+		player.play(card);
 	}
 
-	private void playTreasuresChooseCard(DominionCards card) {
-		Player player = currentPlayer();
+	private void playTreasuresChooseCard(Player player, DominionCard card) {
 		player.removeFromHand(card);
-		player.playCard(card);
+		player.play(card);
 	}
 
-	private void registerCardChoices(Display<?> display, Player player, LinkedHashSet<DominionCards> playActionChoices,
-			Consumer<DominionCards> action) {
-		for (DominionCards card : playActionChoices) {
+	private void registerCardChoices(Display<?> display, Player player, LinkedHashSet<DominionCard> playActionChoices,
+			Consumer<DominionCard> action) {
+		for (DominionCard card : playActionChoices) {
 			display.addExclusiveAction(player.getMember(), card.getEmoji(), p -> action.accept(card));
 		}
+	}
+
+	private Optional<String> requestAction(Player player, Map<String, String> actionEmojiMessages, String message,
+			boolean skippable, boolean hidden) {
+		if (skippable) {
+			if (actionEmojiMessages.isEmpty()) {
+				return Optional.empty();
+			}
+		} else {
+			if (actionEmojiMessages.size() == 1) {
+				return actionEmojiMessages.keySet().stream().findFirst();
+			}
+		}
+
+		Display<Optional<String>> display = hidden ? displayPrivate(player.getMember()) : displayChannel();
+		EmbedBuilder embed = display.getBuilder();
+		embed.addField("Choosing Player", generatePlayerStats(player, false), true);
+		embed.setDescription(message);
+
+		for (Entry<String, String> entry : actionEmojiMessages.entrySet()) {
+			String actionEmoji = entry.getKey();
+			String actionMessage = entry.getValue();
+			embed.addField(actionEmoji + " Action Choice", actionMessage, true);
+			display.addExclusiveAction(player.getMember(), actionEmoji, Optional.of(actionEmoji));
+		}
+
+		if (skippable) {
+			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+		}
+
+		return display.send();
+	}
+
+	private Optional<DominionCard> requestChooseCard(Player player, List<DominionCard> choices, String message,
+			boolean skippable, boolean hidden) {
+		List<DominionCard> uniqueChoices = choices.stream().distinct().collect(Collectors.toList());
+		if (skippable) {
+			if (choices.isEmpty()) {
+				return Optional.empty();
+			}
+		} else {
+			if (uniqueChoices.size() == 1) {
+				return Optional.of(choices.get(0));
+			}
+		}
+
+		if (hidden) {
+			displayChannel(embed -> {
+				embed.setDescription("Sent **" + player.getMember().getEffectiveName()
+						+ "** a private message.  Waiting for a response...");
+			}).send();
+		}
+
+		Display<Optional<DominionCard>> display = hidden ? displayPrivate(player.getMember()) : displayChannel();
+		EmbedBuilder embed = display.getBuilder();
+		if (!hidden) {
+			embed.addField("Choosing Player", generatePlayerStats(player, false), true);
+		}
+		embed.addField("Card Choices", generateDisplayCardList(choices), true);
+		embed.setDescription(message);
+
+		for (DominionCard card : uniqueChoices) {
+			embed.addField(card.getEmoji() + " Choose " + card.getTitle(), card.getText(), true);
+			display.addExclusiveAction(player.getMember(), card.getEmoji(), Optional.of(card));
+		}
+
+		if (skippable) {
+			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+		}
+
+		return display.send();
+	}
+
+	private void requestReveal(Player player, List<DominionCard> cards, String message) {
+		displayChannel(embed -> {
+			embed.addField("Current Player", generatePlayerStats(player, false), true);
+			embed.setDescription(message);
+			embed.addField("Revealed Cards", generateDisplayCardList(cards), true);
+		}).addExclusiveAction(player.getMember(), Emojis.BLOCK_OK, p -> {
+		}).send();
 	}
 
 	@Override
@@ -413,7 +586,9 @@ public class DominionGame extends Game {
 			runPlayActionsPhase(player);
 			runPlayTreasuresPhase(player);
 			runBuyPhase(player);
-			endTurn();
+			endTurn(player);
+			checkGameOver();
+			turn = (turn + 1) % players.size();
 		}
 		runGameOverPhase();
 	}
@@ -422,17 +597,17 @@ public class DominionGame extends Game {
 		player.skipPhase = false;
 
 		while (player.canBuyCards() && !player.skipPhase) {
-			Display<?> display = display(embed -> {
+			Display<?> display = displayChannel(embed -> {
 				embed.setTitle("Buy Phase - Buy any Supply Cards");
 				embed.setDescription(
 						"Buy cards from the supply if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the buy phase by pressing "
 								+ Emojis.TRACK_NEXT + ".");
 
-				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-				embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+				embed.addField("In Hand", generateDisplayCardList(player.hand), true);
+				embed.addField("In Play", generateDisplayCardList(player.play), true);
+				embed.addField("Current Player", generatePlayerStats(player, false), false);
 
-				for (DominionCards card : getBuyChoices()) {
+				for (DominionCard card : getBuyChoices(player)) {
 					embed.addField(
 							card.getEmoji() + " Buy " + card.getTitle()
 									+ (card.getCost() == 0 ? " (Free)" : (" (Cost " + card.getCost() + ")")),
@@ -440,7 +615,7 @@ public class DominionGame extends Game {
 				}
 			});
 
-			registerCardChoices(display, player, getBuyChoices(), this::buyChooseCard);
+			registerCardChoices(display, player, getBuyChoices(player), c -> buyChooseCard(player, c));
 			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
 				player.skipPhase = true;
 			});
@@ -450,12 +625,11 @@ public class DominionGame extends Game {
 	}
 
 	private void runGameOverPhase() {
-		display(embed -> {
-			embed.setDescription("Game Over! The winner is **" + winner.get().getMember().getEffectiveName() + "**!");
+		displayChannel(embed -> {
+			embed.setDescription("Game Over! The winner is **" + winner.get().getName() + "**!");
 
 			for (Player player : players) {
-				embed.addField(
-						player.getMember().getEffectiveName() + "\n(**" + player.getScore() + "** Victory Points)",
+				embed.addField(player.getName() + "\n(**" + player.getScore() + "** Victory Points)",
 						generateDisplayDeckBreakdown(player), true);
 			}
 		}).send();
@@ -466,7 +640,7 @@ public class DominionGame extends Game {
 		while (hotseat) {
 			List<Member> playerMembers = players.stream().map(Player::getMember).collect(Collectors.toList());
 
-			Display<?> display = display(embed -> {
+			Display<?> display = displayChannel(embed -> {
 				embed.setDescription("This is a 2-4 player game, and can take some time to play.\n\n"
 						+ "Try to build a deck with the most victory points when the game ends.  "
 						+ "You play action cards that help you (or hurt others) and buy more cards to build the best deck to win.\n"
@@ -476,8 +650,7 @@ public class DominionGame extends Game {
 						+ " for details, and press the " + Emojis.GAME_DIE + " to begin the game!");
 
 				if (!players.isEmpty()) {
-					embed.addField("Players",
-							playerMembers.stream().map(Member::getEffectiveName).collect(Collectors.joining("\n")),
+					embed.addField("Players", players.stream().map(Player::getName).collect(Collectors.joining("\n")),
 							true);
 				}
 
@@ -511,22 +684,22 @@ public class DominionGame extends Game {
 		player.skipPhase = false;
 
 		while (player.canPlayActions() && !player.skipPhase) {
-			Display<?> display = display(embed -> {
+			Display<?> display = displayChannel(embed -> {
 				embed.setTitle("Action Phase - Play any Action Cards");
 				embed.setDescription(
 						"Play action cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the action phase by pressing "
 								+ Emojis.TRACK_NEXT + ".");
 
-				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-				embed.addField("Current Player", generatePlayerStats(currentPlayer(), true), false);
+				embed.addField("In Hand", generateDisplayCardList(player.hand), true);
+				embed.addField("In Play", generateDisplayCardList(player.play), true);
+				embed.addField("Current Player", generatePlayerStats(player, true), false);
 
-				for (DominionCards card : getPlayActionChoices()) {
+				for (DominionCard card : getPlayActionChoices(player)) {
 					embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
 				}
 			});
 
-			registerCardChoices(display, player, getPlayActionChoices(), this::playActionsChooseCard);
+			registerCardChoices(display, player, getPlayActionChoices(player), c -> playActionsChooseCard(player, c));
 			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
 				player.skipPhase = true;
 			});
@@ -537,25 +710,26 @@ public class DominionGame extends Game {
 
 	private void runPlayTreasuresPhase(Player player) {
 		player.skipPhase = false;
-		autoPlayTreasures();
+		autoPlayTreasures(player);
 
 		while (player.canPlayTreasures() && !player.skipPhase) {
-			Display<?> display = display(embed -> {
+			Display<?> display = displayChannel(embed -> {
 				embed.setTitle("Treasure Phase - Play any Treasure Cards");
 				embed.setDescription(
 						"Play treasure cards if you choose to do so.\n\nPress the corresponding reaction to play that card, or skip the treasure phase by pressing "
 								+ Emojis.TRACK_NEXT + ".");
 
-				embed.addField("In Hand", generateDisplayCardList(currentPlayer().hand), true);
-				embed.addField("In Play", generateDisplayCardList(currentPlayer().play), true);
-				embed.addField("Current Player", generatePlayerStats(currentPlayer(), false), false);
+				embed.addField("In Hand", generateDisplayCardList(player.hand), true);
+				embed.addField("In Play", generateDisplayCardList(player.play), true);
+				embed.addField("Current Player", generatePlayerStats(player, false), false);
 
-				for (DominionCards card : getPlayTreasureChoices()) {
+				for (DominionCard card : getPlayTreasureChoices(player)) {
 					embed.addField(card.getEmoji() + " Play " + card.getTitle(), card.getText(), true);
 				}
 			});
 
-			registerCardChoices(display, player, getPlayTreasureChoices(), this::playTreasuresChooseCard);
+			registerCardChoices(display, player, getPlayTreasureChoices(player),
+					c -> playTreasuresChooseCard(player, c));
 			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
 				player.skipPhase = true;
 			});

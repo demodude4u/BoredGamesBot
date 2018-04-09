@@ -189,7 +189,7 @@ public class Connect4Game extends Game {
 	}
 
 	private void runGameOverPhase() {
-		display(embed -> {
+		displayChannel(embed -> {
 			if (emojiPlayerSet[0].equals(Emojis.QUESTION)) {
 				emojiPlayerSet = Emojis.getRandomPlayerSet();
 			}
@@ -211,7 +211,7 @@ public class Connect4Game extends Game {
 	private void runHotseatPhase() {
 		hotseat = true;
 		while (hotseat) {
-			Display<Boolean> display = display(embed -> {
+			Display<Boolean> display = displayChannel(embed -> {
 				embed.setDescription(
 						"This is a 2-4 player game. Try to create a 4 in a row chain of your player token to win! Press the "
 								+ Emojis.HAND_SPLAYED + " to join, and press the " + Emojis.GAME_DIE
@@ -247,7 +247,7 @@ public class Connect4Game extends Game {
 			int turn = (lastTurn + 1) % players.size();
 			Member player = players.get(turn);
 
-			Display<?> display = display(embed -> {
+			Display<?> display = displayChannel(embed -> {
 				String message = IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
 						.collect(Collectors.joining())
 						+ "\n"

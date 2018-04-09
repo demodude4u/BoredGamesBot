@@ -18,6 +18,7 @@ public final class Emojis {
 	public static final String BLOCK_9 = "9⃣";
 	public static final String BLOCK_10 = "\uD83D\uDD1F";
 	public static final String BLOCK_1234 = "\uD83D\uDD22";
+	public static final String BLOCK_OK = "\uD83C\uDD97";
 	public static final String[] BLOCK_NUMBER = { //
 			BLOCK_0, //
 			BLOCK_1, //
@@ -44,6 +45,7 @@ public final class Emojis {
 
 	public static final String ARROW_UP = "\u2B06";
 	public static final String ARROW_FORWARD = "\u25B6";
+	public static final String ARROW_HEADING_UP = "\u2934";
 	public static final String REWIND = "\u23EA";
 	public static final String SHUFFLE = "\uD83D\uDD00";
 	public static final String TRACK_NEXT = "\u23ED";
@@ -94,6 +96,10 @@ public final class Emojis {
 	public static final String FAMILY_MMB = "\uD83D\uDC68\u200D\uD83D\uDC68\u200D\uD83D\uDC66";
 	public static final String FAMILY_MMBB = "\uD83D\uDC68\u200D\uD83D\uDC68\u200D\uD83D\uDC66\u200D\uD83D\uDC66";
 	public static final String CONSTRUCTION_WORKER = "\uD83D\uDC77";
+	public static final String SANTA = "\uD83C\uDF85";
+	public static final String OLDER_MAN = "\uD83D\uDC74";
+	public static final String GUARDSMAN = "\uD83D\uDC82";
+	public static final String SPY = "\uD83D\uDD75";
 
 	public static final String SIGNAL_STRENGTH = "\uD83D\uDCF6";
 
@@ -111,6 +117,16 @@ public final class Emojis {
 	public static final String CROSSED_SWORDS = "\u2694";
 	public static final String TICKET = "\uD83C\uDFAB";
 	public static final String SHIELD = "\uD83D\uDEE1";
+	public static final String PACKAGE = "\uD83D\uDCE6";
+	public static final String TOOLS = "\uD83D\uDEE0";
+	public static final String BOW_AND_ARROW = "\uD83C\uDFF9";
+	public static final String TOILET = "\uD83D\uDEBD";
+	public static final String DAGGER = "\uD83D\uDDE1";
+	public static final String BOOKS = "\uD83D\uDCDA";
+	public static final String PICK = "\u26CF";
+	public static final String PAINTBRUSH = "\uD83D\uDD8C";
+	public static final String STEW = "\uD83C\uDF72";
+	public static final String GUN = "\uD83D\uDD2B";
 
 	public static final String RICE_SCENE = "\uD83C\uDF91";
 	public static final String FOUNTAIN = "\u26F2";
@@ -119,6 +135,11 @@ public final class Emojis {
 	public static final String OFFICE = "\uD83C\uDFE2";
 	public static final String HOUSE = "\uD83C\uDFE0";
 	public static final String CIRCUS_TENT = "\uD83C\uDFAA";
+	public static final String CHURCH = "\u26EA";
+	public static final String STATUE_OF_LIBERTY = "\uD83D\uDDFD";
+	public static final String BANK = "\uD83C\uDFE6";
+	public static final String HOUSE_ABANDONED = "\uD83C\uDFDA";
+	public static final String CLASSICAL_BUILDING = "\uD83C\uDFDB";
 
 	public static final String[][] PLAYER_SETS = { //
 			{ RED_HEART, BLUE_HEART, GREEN_HEART, YELLOW_HEART }, //

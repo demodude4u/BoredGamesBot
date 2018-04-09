@@ -10,6 +10,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,12 +24,14 @@ import com.demod.dcba.ReactionWatcher;
 import com.demod.discord.boredgames.Display.ResultAction;
 import com.demod.discord.boredgames.game.Connect4Game;
 import com.demod.discord.boredgames.game.DominionGame;
+import com.demod.discord.boredgames.game.TestGame;
 import com.demod.discord.boredgames.game.YahtzeeGame;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.AbstractIdleService;
 
 import net.dv8tion.jda.core.Permission;
+import net.dv8tion.jda.core.entities.ChannelType;
 import net.dv8tion.jda.core.entities.Message;
 import net.dv8tion.jda.core.entities.MessageChannel;
 import net.dv8tion.jda.core.entities.MessageEmbed;
@@ -37,6 +41,8 @@ import net.dv8tion.jda.core.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.core.events.message.react.MessageReactionRemoveEvent;
 
 public class DiscordBoredGameBot extends AbstractIdleService {
+
+	private static ExecutorService executor = Executors.newCachedThreadPool();
 
 	public static void main(String[] args) {
 		new DiscordBoredGameBot().startAsync().awaitTerminated();
@@ -61,12 +67,14 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 				.withInvite(Permission.MESSAGE_ADD_REACTION, Permission.MESSAGE_EMBED_LINKS,
 						Permission.MESSAGE_EXT_EMOJI, Permission.MESSAGE_MANAGE)
 				//
-				.addCommand("connect4", (e) -> startGame(e.getTextChannel(), new Connect4Game()))//
+				.addCommand("connect4", e -> startGame(e.getTextChannel(), new Connect4Game()))//
 				.withHelp("Start a game of Connect Four. (2-4 Players)")//
-				.addCommand("yahtzee", (e) -> startGame(e.getTextChannel(), new YahtzeeGame()))//
+				.addCommand("yahtzee", e -> startGame(e.getTextChannel(), new YahtzeeGame()))//
 				.withHelp("Start a game of Yahtzee! (1 Player)")//
-				.addCommand("dominion", (e) -> startGame(e.getTextChannel(), new DominionGame()))//
+				.addCommand("dominion", e -> startGame(e.getTextChannel(), new DominionGame()))//
 				.withHelp("Start a game of Dominion! (2-4 Players)")//
+				//
+				.addCommand("testgame", e -> startGame(e.getTextChannel(), new TestGame()))//
 				//
 				.addReactionWatcher(new ReactionWatcher() {
 					@Override
@@ -88,7 +96,11 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 			return;
 		}
 
-		Optional.ofNullable(awaitingReactions.get(e.getMessageId())).ifPresent(c -> c.accept(e));
+		Optional.ofNullable(awaitingReactions.get(e.getMessageId())).ifPresent(c -> {
+			executor.submit(() -> {
+				c.accept(e);
+			});
+		});
 	}
 
 	private Optional<Message> reloadMessage(Message message) {
@@ -158,7 +170,8 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 			message = reloadMessage(message.get());
 		}
 
-		if (message.isPresent() && !message.get().getChannel().getId().equals(channel.getId())) {
+		if (message.isPresent() && (!message.get().getChannel().getId().equals(channel.getId())
+				|| channel.getType() == ChannelType.PRIVATE)) {
 			message.get().delete().complete();
 			message = Optional.empty();
 		}
@@ -174,7 +187,7 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 		List<String> lastActions = message.map(
 				m -> m.getReactions().stream().map(r -> r.getReactionEmote().getName()).collect(Collectors.toList()))
 				.orElseGet(ImmutableList::of);
-		if (!Iterables.elementsEqual(lastActions, actions.keySet())) {
+		if (!lastActions.isEmpty() && !Iterables.elementsEqual(lastActions, actions.keySet())) {
 			message.get().clearReactions().complete();
 			message = reloadMessage(message.get());
 		}
@@ -197,6 +210,7 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 					awaitor.complete(result);
 				} catch (Exception e1) {
 					awaitor.completeExceptionally(e1);
+					System.out.println("ACTION EXCEPTIONED - " + e1.getMessage());
 				}
 			});
 

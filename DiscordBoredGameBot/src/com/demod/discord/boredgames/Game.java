@@ -32,18 +32,6 @@ public abstract class Game {
 
 	private final Map<String, Message> messages = new ConcurrentHashMap<>();
 
-	public <T> Display<T> display(Consumer<EmbedBuilder> builder) {
-		Display<T> display = display(channel);
-		builder.accept(display.getBuilder());
-		return display;
-	}
-
-	public <T> Display<T> display(Member player, Consumer<EmbedBuilder> builder) {
-		Display<T> display = display(player.getUser().openPrivateChannel().complete());
-		builder.accept(display.getBuilder());
-		return display;
-	}
-
 	private <T> Display<T> display(MessageChannel channel) {
 		Display<T> display = new Display<T>(d -> {
 			String messageKey = channel.getId();
@@ -53,6 +41,26 @@ public abstract class Game {
 			return entry.getValue();
 		});
 		display.getBuilder().setTitle(getTitle());
+		return display;
+	}
+
+	public <T> Display<T> displayChannel() {
+		return display(channel);
+	}
+
+	public <T> Display<T> displayChannel(Consumer<EmbedBuilder> builder) {
+		Display<T> display = displayChannel();
+		builder.accept(display.getBuilder());
+		return display;
+	}
+
+	public <T> Display<T> displayPrivate(Member player) {
+		return display(player.getUser().openPrivateChannel().complete());
+	}
+
+	public <T> Display<T> displayPrivate(Member player, Consumer<EmbedBuilder> builder) {
+		Display<T> display = displayPrivate(player);
+		builder.accept(display.getBuilder());
 		return display;
 	}
 

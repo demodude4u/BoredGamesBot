@@ -382,7 +382,7 @@ public class YahtzeeGame extends Game {
 	}
 
 	private void runChoosingPhase() {
-		Display<?> display = display(embed -> {
+		Display<?> display = displayChannel(embed -> {
 			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
 			embed.addField("Score Card", generateDisplayScoreCard(), true);
 			embed.addField("Choose Scoring", generateDisplayChoices(), true);
@@ -427,7 +427,7 @@ public class YahtzeeGame extends Game {
 	private void runGameOverPhase() {
 		savePlayerScore();
 
-		display(embed -> {
+		displayChannel(embed -> {
 			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
 			embed.addField("Score Card", generateDisplayScoreCard(), true);
 			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
@@ -436,7 +436,7 @@ public class YahtzeeGame extends Game {
 	}
 
 	private void runHotseatPhase() {
-		display(embed -> {
+		displayChannel(embed -> {
 			embed.setDescription("This is a singleplayer game. Press the " + Emojis.GAME_DIE + " to start!");
 			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
 
@@ -452,7 +452,7 @@ public class YahtzeeGame extends Game {
 		rollDice();
 
 		while (rollCount < 3) {
-			display(embed -> {
+			displayChannel(embed -> {
 				embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
 				embed.addField("Score Card", generateDisplayScoreCard(), false);
 				embed.addField("Rolled Dice", generateDisplayRolledDice(true), true);

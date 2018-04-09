@@ -1,5 +1,6 @@
 package com.demod.discord.boredgames;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Function;
@@ -58,6 +59,12 @@ public class Display<T> {
 		return this;
 	};
 
+	public Display<T> addAction(String emoji, T result) {
+		return addAction(emoji, p -> {
+			return result;
+		});
+	}
+
 	public Display<T> addExclusiveAction(List<Member> players, String emoji, Action action) {
 		return addExclusiveAction(players, emoji, new ResultAction<T>() {
 			@Override
@@ -77,13 +84,20 @@ public class Display<T> {
 		return addAction(emoji, new ResultAction<T>() {
 			@Override
 			public boolean accept(Member p) {
-				return players.contains(p) && action.accept(p);
+				return players.stream().anyMatch(p2 -> p.getUser().getId().equals(p2.getUser().getId()))
+						&& action.accept(p);
 			}
 
 			@Override
 			public T call(Member p) {
 				return action.call(p);
 			}
+		});
+	}
+
+	public Display<T> addExclusiveAction(List<Member> players, String emoji, T result) {
+		return addExclusiveAction(players, emoji, p -> {
+			return result;
 		});
 	}
 
@@ -103,16 +117,12 @@ public class Display<T> {
 	}
 
 	public Display<T> addExclusiveAction(Member player, String emoji, ResultAction<? extends T> action) {
-		return addAction(emoji, new ResultAction<T>() {
-			@Override
-			public boolean accept(Member p) {
-				return p.equals(player) && action.accept(p);
-			}
+		return addExclusiveAction(Arrays.asList(player), emoji, action);
+	}
 
-			@Override
-			public T call(Member p) {
-				return action.call(p);
-			}
+	public Display<T> addExclusiveAction(Member player, String emoji, T result) {
+		return addExclusiveAction(player, emoji, p -> {
+			return result;
 		});
 	}
 
