@@ -2,7 +2,9 @@ package com.demod.discord.boredgames;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 
 import net.dv8tion.jda.core.EmbedBuilder;
@@ -33,6 +35,7 @@ public class Display<T> {
 	private final EmbedBuilder builder = new EmbedBuilder();
 
 	private final LinkedHashMap<String, ResultAction<T>> actions = new LinkedHashMap<>();
+	private final Set<Member> notify = new LinkedHashSet<>();
 
 	Display(Function<Display<T>, T> displayer) {
 		this.displayer = displayer;
@@ -81,6 +84,7 @@ public class Display<T> {
 	}
 
 	public Display<T> addExclusiveAction(List<Member> players, String emoji, ResultAction<? extends T> action) {
+		notify.addAll(players);
 		return addAction(emoji, new ResultAction<T>() {
 			@Override
 			public boolean accept(Member p) {
@@ -132,6 +136,10 @@ public class Display<T> {
 
 	public EmbedBuilder getBuilder() {
 		return builder;
+	}
+
+	public Set<Member> getNotify() {
+		return notify;
 	}
 
 	public T send() {

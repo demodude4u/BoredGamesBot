@@ -40,7 +40,7 @@ public class TestGame extends Game {
 		boolean highFived = privateHighFive(player);
 		displayChannel(embed -> {
 			if (highFived) {
-				embed.setDescription("Rightous! " + Emojis.HAND_SPLAYED);
+				embed.setDescription("Righteous! " + Emojis.HAND_SPLAYED);
 			} else {
 				embed.setDescription("Aww man...");
 			}

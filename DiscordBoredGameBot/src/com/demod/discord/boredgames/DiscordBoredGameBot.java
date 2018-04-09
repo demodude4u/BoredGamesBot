@@ -28,10 +28,11 @@ import com.demod.discord.boredgames.game.TestGame;
 import com.demod.discord.boredgames.game.YahtzeeGame;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.AbstractIdleService;
+import com.google.common.util.concurrent.AbstractScheduledService;
 
 import net.dv8tion.jda.core.Permission;
 import net.dv8tion.jda.core.entities.ChannelType;
+import net.dv8tion.jda.core.entities.Member;
 import net.dv8tion.jda.core.entities.Message;
 import net.dv8tion.jda.core.entities.MessageChannel;
 import net.dv8tion.jda.core.entities.MessageEmbed;
@@ -40,7 +41,9 @@ import net.dv8tion.jda.core.events.message.react.GenericMessageReactionEvent;
 import net.dv8tion.jda.core.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.core.events.message.react.MessageReactionRemoveEvent;
 
-public class DiscordBoredGameBot extends AbstractIdleService {
+public class DiscordBoredGameBot extends AbstractScheduledService {
+
+	private static final int NOTIFY_MINUTES = 5;
 
 	private static ExecutorService executor = Executors.newCachedThreadPool();
 
@@ -57,6 +60,8 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 
 	// Key = Message ID
 	private final Map<String, Consumer<GenericMessageReactionEvent>> awaitingReactions = new ConcurrentHashMap<>();
+
+	private final ConcurrentHashMap<Member, Entry<TextChannel, Long>> notifyMemberMillis = new ConcurrentHashMap<>();
 
 	public DiscordBoredGameBot() {
 		bot = DCBA.builder()//
@@ -91,12 +96,40 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 				.create();
 	}
 
+	private void checkAndNotifyMembers() {
+		long nowMillis = System.currentTimeMillis();
+		Iterables.removeIf(notifyMemberMillis.entrySet(), entry -> {
+			Member player = entry.getKey();
+			TextChannel channel = entry.getValue().getKey();
+			long notifyMillis = entry.getValue().getValue();
+			if (nowMillis > notifyMillis) {
+				try {
+					player.getUser().openPrivateChannel().complete()
+							.sendMessage("Hi! It is your turn! ==> " + channel.getAsMention()).complete();
+					System.out.println("Notified " + player.getEffectiveName() + " to take their turn.");
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+				return true;
+			}
+			return false;
+		});
+	}
+
+	public void notifyForAction(Member player, TextChannel channel) {
+		notifyMemberMillis.put(player, new SimpleImmutableEntry<>(channel,
+				System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(NOTIFY_MINUTES)));
+	}
+
 	private synchronized void onAction(GenericMessageReactionEvent e) {
 		if (e.getUser().isBot()) {
 			return;
 		}
 
 		Optional.ofNullable(awaitingReactions.get(e.getMessageId())).ifPresent(c -> {
+			if (e.isFromType(ChannelType.TEXT)) {
+				notifyMemberMillis.remove(e.getMember());
+			}
 			executor.submit(() -> {
 				c.accept(e);
 			});
@@ -109,6 +142,16 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 		} catch (Exception e) {
 			return Optional.empty();
 		}
+	}
+
+	@Override
+	protected void runOneIteration() throws Exception {
+		checkAndNotifyMembers();
+	}
+
+	@Override
+	protected Scheduler scheduler() {
+		return Scheduler.newFixedDelaySchedule(1, 1, TimeUnit.MINUTES);
 	}
 
 	@Override
@@ -143,8 +186,8 @@ public class DiscordBoredGameBot extends AbstractIdleService {
 				game.setInternalInfo(this, channel, gameId, Thread.currentThread());
 				game.run();
 			} catch (Throwable e) {
-				System.err.println("GAME IS KILL :(");
 				e.printStackTrace();
+				System.err.println("GAME IS KILL :(");
 				throw e;
 			} finally {
 				System.out.println("GAME OVER: " + game.getClass().getSimpleName() + " #" + gameId);

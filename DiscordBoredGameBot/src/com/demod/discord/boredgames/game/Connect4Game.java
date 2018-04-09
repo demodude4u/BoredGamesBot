@@ -228,7 +228,6 @@ public class Connect4Game extends Game {
 
 			if (players.size() < 4) {
 				display.addAction(Emojis.HAND_SPLAYED, player -> {
-					System.out.println("???");
 					hotseatNewPlayer(player);
 				});
 			}

@@ -13,6 +13,7 @@ import org.json.JSONObject;
 import com.demod.dcba.GuildSettings;
 
 import net.dv8tion.jda.core.EmbedBuilder;
+import net.dv8tion.jda.core.entities.ChannelType;
 import net.dv8tion.jda.core.entities.Member;
 import net.dv8tion.jda.core.entities.Message;
 import net.dv8tion.jda.core.entities.MessageChannel;
@@ -36,6 +37,9 @@ public abstract class Game {
 		Display<T> display = new Display<T>(d -> {
 			String messageKey = channel.getId();
 			Message message = messages.get(messageKey);
+			if (d.getNotify().size() == 1 && channel.getType() == ChannelType.TEXT) {
+				bot.notifyForAction(d.getNotify().iterator().next(), (TextChannel) channel);
+			}
 			Entry<Message, T> entry = bot.waitForDisplay(d, channel, Optional.ofNullable(message));
 			messages.put(messageKey, entry.getKey());
 			return entry.getValue();

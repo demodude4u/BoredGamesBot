@@ -558,14 +558,30 @@ public class DominionGame extends Game {
 
 		for (DominionCard card : uniqueChoices) {
 			embed.addField(card.getEmoji() + " Choose " + card.getTitle(), card.getText(), true);
-			display.addExclusiveAction(player.getMember(), card.getEmoji(), Optional.of(card));
+			if (hidden) {
+				display.addAction(card.getEmoji(), Optional.of(card));
+			} else {
+				display.addExclusiveAction(player.getMember(), card.getEmoji(), Optional.of(card));
+			}
 		}
 
 		if (skippable) {
-			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+			if (hidden) {
+				display.addAction(Emojis.TRACK_NEXT, Optional.empty());
+			} else {
+				display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+			}
 		}
 
-		return display.send();
+		Optional<DominionCard> result = display.send();
+
+		if (hidden) {
+			displayPrivate(player.getMember(), e -> {
+				e.setDescription("Your response has been submitted.");
+			}).send();
+		}
+
+		return result;
 	}
 
 	private void requestReveal(Player player, List<DominionCard> cards, String message) {
