@@ -37,6 +37,8 @@ public class Display<T> {
 	private final LinkedHashMap<String, ResultAction<T>> actions = new LinkedHashMap<>();
 	private final Set<Member> notify = new LinkedHashSet<>();
 
+	private boolean ignoreReactions;
+
 	Display(Function<Display<T>, T> displayer) {
 		this.displayer = displayer;
 	}
@@ -140,6 +142,15 @@ public class Display<T> {
 
 	public Set<Member> getNotify() {
 		return notify;
+	}
+
+	public Display<T> ignoreReactions() {
+		ignoreReactions = true;
+		return this;
+	}
+
+	public boolean isIgnoreReactions() {
+		return ignoreReactions;
 	}
 
 	public T send() {

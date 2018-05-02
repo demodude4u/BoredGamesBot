@@ -230,7 +230,8 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 		List<String> lastActions = message.map(
 				m -> m.getReactions().stream().map(r -> r.getReactionEmote().getName()).collect(Collectors.toList()))
 				.orElseGet(ImmutableList::of);
-		if (!lastActions.isEmpty() && !Iterables.elementsEqual(lastActions, actions.keySet())) {
+		if (!lastActions.isEmpty() && !Iterables.elementsEqual(lastActions, actions.keySet())
+				&& !display.isIgnoreReactions()) {
 			message.get().clearReactions().complete();
 			message = reloadMessage(message.get());
 		}
@@ -257,8 +258,10 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 				}
 			});
 
-			for (String emoji : actions.keySet()) {
-				message.get().addReaction(emoji).complete();
+			if (!display.isIgnoreReactions()) {
+				for (String emoji : actions.keySet()) {
+					message.get().addReaction(emoji).complete();
+				}
 			}
 		} else {
 			awaitor.complete(null);

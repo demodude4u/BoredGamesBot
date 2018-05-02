@@ -3,12 +3,14 @@ package com.demod.discord.boredgames.game;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
+import com.google.common.util.concurrent.Uninterruptibles;
 
 import net.dv8tion.jda.core.entities.Member;
 
@@ -38,16 +40,29 @@ public class Connect4Game extends Game {
 		emojiPlayerSet = Emojis.getRandomPlayerSet();
 	}
 
-	public void applyMove(Member player, int column) {
-		int turn = (lastTurn + 1) % players.size();
-
-		Tile tile = Tile.values()[1 + turn];
+	private void animateMove(int column, Tile tile) {
 		for (int i = rows - 1; i >= 0; i--) {
-			final int height = i;
+			int height = i;
+			if (tiles[column][height] == Tile.NONE) {
+
+				tiles[column][height] = tile;
+				displayChannel(embed -> {
+					embed.setDescription(generateTilesEmoji());
+				}).ignoreReactions().send();
+				Uninterruptibles.sleepUninterruptibly(1000, TimeUnit.MILLISECONDS);
+				tiles[column][height] = Tile.NONE;
+
+			} else {
+				break;
+			}
+		}
+	}
+
+	public void applyMove(int column, Tile tile) {
+		for (int i = rows - 1; i >= 0; i--) {
+			int height = i;
 			if (height == 0 || tiles[column][height - 1] != Tile.NONE) {
 				tiles[column][height] = tile;
-				lastTurnColumn = column;
-				lastTurn = turn;
 				checkForWinner(column, height, tile);
 				return;
 			}
@@ -190,7 +205,8 @@ public class Connect4Game extends Game {
 
 	private void runGameOverPhase() {
 		displayChannel(embed -> {
-			if (emojiPlayerSet[0].equals(Emojis.QUESTION)) {
+			boolean mystery = emojiPlayerSet[0].equals(Emojis.QUESTION);
+			if (mystery) {
 				emojiPlayerSet = Emojis.getRandomPlayerSet();
 			}
 			if (winner != -1) {
@@ -198,8 +214,9 @@ public class Connect4Game extends Game {
 						IntStream.range(0, 4).mapToObj(i -> emojiPlayerSet[winner]).collect(Collectors.joining()),
 						true);
 			} else {
-				embed.addField("It's a Draw!", IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
-						.collect(Collectors.joining()), true);
+				embed.addField("It's a Draw!", IntStream.range(0, players.size())
+						.mapToObj(i -> mystery ? Emojis.QUESTION : emojiPlayerSet[i]).collect(Collectors.joining()),
+						true);
 			}
 
 			embed.setDescription(generateTilesEmoji());
@@ -246,7 +263,7 @@ public class Connect4Game extends Game {
 			int turn = (lastTurn + 1) % players.size();
 			Member player = players.get(turn);
 
-			Display<?> display = displayChannel(embed -> {
+			Display<Integer> display = displayChannel(embed -> {
 				String message = IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
 						.collect(Collectors.joining())
 						+ "\n"
@@ -263,11 +280,16 @@ public class Connect4Game extends Game {
 			for (int i = 0; i < columns; i++) {
 				final int column = i;
 				if (canMove(column)) {
-					display.addExclusiveAction(player, Emojis.BLOCK_NUMBER[column + 1], p -> applyMove(p, column));
+					display.addExclusiveAction(player, Emojis.BLOCK_NUMBER[column + 1], column);
 				}
 			}
 
-			display.send();
+			Tile tile = Tile.values()[1 + turn];
+			lastTurnColumn = display.send();
+			lastTurn = turn;
+
+			animateMove(lastTurnColumn, tile);
+			applyMove(lastTurnColumn, tile);
 		}
 	}
 }
