@@ -1,18 +1,12 @@
 package com.demod.discord.boredgames;
 
-import java.io.FileInputStream;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.time.Instant;
 import java.util.AbstractMap.SimpleImmutableEntry;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
-import java.util.Scanner;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -23,10 +17,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import com.demod.dcba.DCBA;
 import com.demod.dcba.DiscordBot;
@@ -51,8 +41,6 @@ import net.dv8tion.jda.core.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.core.events.message.react.MessageReactionRemoveEvent;
 
 public class DiscordBoredGameBot extends AbstractScheduledService {
-	private static final String PERSISTENCE_FILE = "persist.json";
-	private static final String PKEY_TURN_NOTIFY = "turn-notify";
 	private static final int NOTIFY_MINUTES = 5;
 
 	private static ExecutorService executor = Executors.newCachedThreadPool();
@@ -70,9 +58,7 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 	// Key = Message ID
 	private final Map<String, Consumer<GenericMessageReactionEvent>> awaitingReactions = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<Member, Entry<TextChannel, Long>> notifyMemberMillis = new ConcurrentHashMap<>();
-
-	// User ID
-	private Set<String> turnNotify = new HashSet<>();
+	private final ConcurrentHashMap<Member, Long> memberLastActionMillis = new ConcurrentHashMap<>();
 
 	public DiscordBoredGameBot() {
 		bot = DCBA.builder()//
@@ -90,15 +76,6 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 				.addCommand("dominion", e -> startGame(e.getTextChannel(), new DominionGame()))//
 				.withHelp("Start a game of Dominion! (2-4 Players)")//
 				//
-				.addCommand("notify", (e, args) -> {
-					boolean off = (args.length > 0) && args[0].toLowerCase().equals("off");
-					if (off) {
-						turnNotify.remove(e.getAuthor().getId());
-					} else {
-						turnNotify.add(e.getAuthor().getId());
-					}
-					savePersistent(PKEY_TURN_NOTIFY, new JSONArray(turnNotify));
-				})//
 				.withHelp("Specify `on` or `off` to turn on/off turn notifications.")
 				//
 				.addReactionWatcher(new ReactionWatcher() {
@@ -136,16 +113,11 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 		});
 	}
 
-	@SuppressWarnings("unchecked")
-	private <T> T loadPersistent(String pkey) {
-		return (T) readPersistent().opt(pkey);
-	}
-
 	public void notifyForAction(Member player, TextChannel channel) {
-		if (turnNotify.contains(player.getUser().getId())) {
-			notifyMemberMillis.put(player, new SimpleImmutableEntry<>(channel,
-					System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(NOTIFY_MINUTES)));
-		}
+		Optional<Long> lastActionMillis = Optional.ofNullable(memberLastActionMillis.get(player));
+		notifyMemberMillis.put(player, new SimpleImmutableEntry<>(channel,
+				lastActionMillis.orElse(System.currentTimeMillis()) + TimeUnit.MINUTES.toMillis(NOTIFY_MINUTES)));
+		checkAndNotifyMembers();
 	}
 
 	private synchronized void onAction(GenericMessageReactionEvent e) {
@@ -156,21 +128,12 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 		Optional.ofNullable(awaitingReactions.get(e.getMessageId())).ifPresent(c -> {
 			if (e.isFromType(ChannelType.TEXT)) {
 				notifyMemberMillis.remove(e.getMember());
+				memberLastActionMillis.put(e.getMember(), System.currentTimeMillis());
 			}
 			executor.submit(() -> {
 				c.accept(e);
 			});
 		});
-	}
-
-	private synchronized JSONObject readPersistent() {
-		try (Scanner scanner = new Scanner(new FileInputStream(PERSISTENCE_FILE), "UTF-8")) {
-			scanner.useDelimiter("\\A");
-			return new JSONObject(scanner.next());
-		} catch (JSONException | IOException e) {
-			System.out.println(PERSISTENCE_FILE + " was not found!");
-			return new JSONObject();
-		}
 	}
 
 	private Optional<Message> reloadMessage(Message message) {
@@ -184,17 +147,6 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 	@Override
 	protected void runOneIteration() throws Exception {
 		checkAndNotifyMembers();
-	}
-
-	private synchronized void savePersistent(String pkey, Object data) {
-		JSONObject jsonObject = readPersistent();
-		jsonObject.put(pkey, data);
-
-		try (FileWriter fw = new FileWriter(PERSISTENCE_FILE)) {
-			fw.write(jsonObject.toString(2));
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
 	}
 
 	@Override
@@ -248,8 +200,6 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 
 	@Override
 	protected void startUp() {
-		turnNotify = new HashSet<>(this.<JSONArray>loadPersistent(PKEY_TURN_NOTIFY).toList().stream()
-				.map(Object::toString).collect(Collectors.toList()));
 		bot.startAsync().awaitRunning();
 		System.out.println(bot.getJDA().asBot().getInviteUrl());
 	}
