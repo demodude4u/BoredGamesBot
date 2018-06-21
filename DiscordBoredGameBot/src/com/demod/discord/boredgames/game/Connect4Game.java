@@ -211,7 +211,8 @@ public class Connect4Game extends Game {
 			}
 			if (winner != -1) {
 				embed.addField(players.get(winner).getEffectiveName() + " Wins!",
-						IntStream.range(0, 4).mapToObj(i -> emojiPlayerSet[winner]).collect(Collectors.joining()),
+						IntStream.range(0, 4).mapToObj(i -> mystery ? Emojis.QUESTION : emojiPlayerSet[winner])
+								.collect(Collectors.joining()),
 						true);
 			} else {
 				embed.addField("It's a Draw!", IntStream.range(0, players.size())
