@@ -9,6 +9,7 @@ import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.json.JSONObject;
@@ -18,7 +19,9 @@ import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.google.common.primitives.Booleans;
 
-import net.dv8tion.jda.core.entities.Member;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
 
 public class YahtzeeGame extends Game {
 
@@ -37,10 +40,11 @@ public class YahtzeeGame extends Game {
 		CHANCE("Chance", Emojis.QUESTION), //
 		YAHTZEE("Yahtzee", Emojis.BANGBANG),//
 		;
-		private final String label;
-		private final String emoji;
 
-		private Category(String label, String emoji) {
+		private final String label;
+		private final Emoji emoji;
+
+		private Category(String label, Emoji emoji) {
 			this.label = label;
 			this.emoji = emoji;
 		}
@@ -65,7 +69,7 @@ public class YahtzeeGame extends Game {
 		gameOverPhrases.put(1000, "YOU ARE A YAHTZEE GOD!");
 	}
 
-	private Member player = null;
+	private User player = null;
 	private final int[] categoryPoints;
 	private final boolean[] categoryScored;
 	private int upperBonusPoints;
@@ -150,11 +154,8 @@ public class YahtzeeGame extends Game {
 		return bonusPoints;
 	}
 
-	private String generateDisplayChoices() {
+	private String generateDisplayChoices(int[] gainPoints, int[] bonusPoints) {
 		StringBuilder sb = new StringBuilder();
-
-		int[] gainPoints = generateGainPoints();
-		int[] bonusPoints = generateBonusPoints();
 
 		boolean firstLine = true;
 		for (int i = 0; i < categoryPoints.length; i++) {
@@ -170,7 +171,7 @@ public class YahtzeeGame extends Game {
 				firstLine = false;
 			}
 
-			sb.append(category.emoji + " ");
+			sb.append(category.emoji.getFormatted() + " ");
 
 			sb.append((gainPoints[i] > 0) ? ("**+" + gainPoints[i] + "**") : Integer.toString(gainPoints[i]));
 			sb.append((bonusPoints[i] > 0) ? (" **(+" + bonusPoints[i] + " Bonus)**") : "");
@@ -182,7 +183,7 @@ public class YahtzeeGame extends Game {
 	}
 
 	private String generateDisplayLeaderboard() {
-		List<Entry<Member, Integer>> leaderboard = getGlobalSaves().entrySet().stream()
+		List<Entry<User, Integer>> leaderboard = getSaves().entrySet().stream()
 				.map(e -> new SimpleImmutableEntry<>(e.getKey(), e.getValue().optInt(JSONKEY_BESTSCORE, 0)))
 				.sorted((p1, p2) -> Integer.compare(p2.getValue(), p1.getValue())).limit(10)
 				.collect(Collectors.toList());
@@ -192,7 +193,7 @@ public class YahtzeeGame extends Game {
 			if (i > 0) {
 				sb.append('\n');
 			}
-			Entry<Member, Integer> pair = leaderboard.get(i);
+			Entry<User, Integer> pair = leaderboard.get(i);
 			sb.append("#" + (i + 1) + " " + pair.getKey().getEffectiveName() + " (" + pair.getValue() + " points)");
 		}
 		return sb.toString();
@@ -202,13 +203,13 @@ public class YahtzeeGame extends Game {
 		StringBuilder sb = new StringBuilder();
 
 		for (int dice : rolledDice) {
-			sb.append(Emojis.BLOCK_NUMBER[dice]);
+			sb.append(Emojis.BLOCK_NUMBER[dice].getFormatted());
 		}
 
 		if (showLocks) {
 			sb.append('\n');
 			for (boolean lock : lockedDice) {
-				sb.append(lock ? Emojis.LOCK : Emojis.SMALL_BLACK_SQUARE);
+				sb.append((lock ? Emojis.LOCK : Emojis.SMALL_BLACK_SQUARE).getFormatted());
 			}
 		}
 
@@ -382,10 +383,15 @@ public class YahtzeeGame extends Game {
 	}
 
 	private void runChoosingPhase() {
+		int[] gainPoints = generateGainPoints();
+		int[] bonusPoints = generateBonusPoints();
+		Function<Integer, ButtonStyle> style = i -> bonusPoints[i] > 0 ? ButtonStyle.SUCCESS
+				: gainPoints[i] > 0 ? ButtonStyle.PRIMARY : ButtonStyle.SECONDARY;
+
 		Display<?> display = displayChannel(embed -> {
-			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+			embed.setAuthor(player.getEffectiveName(), null, player.getEffectiveAvatarUrl());
 			embed.addField("Score Card", generateDisplayScoreCard(), true);
-			embed.addField("Choose Scoring", generateDisplayChoices(), true);
+			embed.addField("Choose Scoring", generateDisplayChoices(gainPoints, bonusPoints), true);
 			embed.addField("Rolled Dice", generateDisplayRolledDice(false), false);
 			embed.setFooter("Press the matching symbol to choose a category.", null);
 		});
@@ -393,14 +399,16 @@ public class YahtzeeGame extends Game {
 		if (checkJoker()) {// Forced Joker Rules
 			if (!checkJokerUpperScored()) {
 				Category category = Category.values()[rolledDice[0] - 1];
-				display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				display.addExclusiveAction(player, style.apply(category.ordinal()), category.emoji, category.label,
+						p -> chooseCategory(category));
 			} else if (checkLowerAvailable()) {
 				for (int i = 6; i < categoryPoints.length; i++) {
 					final Category category = Category.values()[i];
 					if (categoryScored[i]) {
 						continue;
 					}
-					display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+					display.addExclusiveAction(player, style.apply(i), category.emoji, category.label,
+							p -> chooseCategory(category));
 				}
 			} else {
 				for (int i = 0; i < 6; i++) {
@@ -408,7 +416,8 @@ public class YahtzeeGame extends Game {
 					if (categoryScored[i]) {
 						continue;
 					}
-					display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+					display.addExclusiveAction(player, style.apply(i), category.emoji, category.label,
+							p -> chooseCategory(category));
 				}
 			}
 		} else {
@@ -417,7 +426,8 @@ public class YahtzeeGame extends Game {
 				if (categoryScored[i]) {
 					continue;
 				}
-				display.addExclusiveAction(player, category.emoji, p -> chooseCategory(category));
+				display.addExclusiveAction(player, style.apply(i), category.emoji, category.label,
+						p -> chooseCategory(category));
 			}
 		}
 
@@ -428,7 +438,7 @@ public class YahtzeeGame extends Game {
 		savePlayerScore();
 
 		displayChannel(embed -> {
-			embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+			embed.setAuthor(player.getEffectiveName(), null, player.getEffectiveAvatarUrl());
 			embed.addField("Score Card", generateDisplayScoreCard(), true);
 			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
 			embed.setFooter("Game over! " + getGameOverMessage(), null);
@@ -437,10 +447,11 @@ public class YahtzeeGame extends Game {
 
 	private void runHotseatPhase() {
 		displayChannel(embed -> {
-			embed.setDescription("This is a singleplayer game. Press the " + Emojis.GAME_DIE + " to start!");
+			embed.setDescription(
+					"This is a singleplayer game. Press the " + Emojis.GAME_DIE.getFormatted() + " to start!");
 			embed.addField("Leaderboard", generateDisplayLeaderboard(), true);
 
-		}).addAction(Emojis.GAME_DIE, p -> {
+		}).addAction(ButtonStyle.SUCCESS, Emojis.GAME_DIE, "Roll", p -> {
 			this.player = p;
 
 		}).send();
@@ -452,30 +463,36 @@ public class YahtzeeGame extends Game {
 		rollDice();
 
 		while (rollCount < 3) {
-			displayChannel(embed -> {
-				embed.setAuthor(player.getEffectiveName(), null, player.getUser().getEffectiveAvatarUrl());
+			Display<?> display = displayChannel(embed -> {
+				embed.setAuthor(player.getEffectiveName(), null, player.getEffectiveAvatarUrl());
 				embed.addField("Score Card", generateDisplayScoreCard(), false);
 				embed.addField("Rolled Dice", generateDisplayRolledDice(true), true);
 				embed.addField("Rolls", "**" + (3 - rollCount) + "** Remaining", true);
 				embed.setFooter("Press 1-5 to lock the dice, press dice to roll again.", null);
-			})//
-					.addExclusiveAction(player, Emojis.BLOCK_1, p -> toggleLockDice(0))//
-					.addExclusiveAction(player, Emojis.BLOCK_2, p -> toggleLockDice(1))//
-					.addExclusiveAction(player, Emojis.BLOCK_3, p -> toggleLockDice(2))//
-					.addExclusiveAction(player, Emojis.BLOCK_4, p -> toggleLockDice(3))//
-					.addExclusiveAction(player, Emojis.BLOCK_5, p -> toggleLockDice(4))//
-					.addExclusiveAction(player, Emojis.GAME_DIE, p -> rollDice())//
-					.send();
+			});//
+
+			display.addExclusiveAction(player, lockedDice[0] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.BLOCK_NUMBER[rolledDice[0]], null, p -> toggleLockDice(0));
+			display.addExclusiveAction(player, lockedDice[1] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.BLOCK_NUMBER[rolledDice[1]], null, p -> toggleLockDice(1));
+			display.addExclusiveAction(player, lockedDice[2] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.BLOCK_NUMBER[rolledDice[2]], null, p -> toggleLockDice(2));
+			display.addExclusiveAction(player, lockedDice[3] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.BLOCK_NUMBER[rolledDice[3]], null, p -> toggleLockDice(3));
+			display.addExclusiveAction(player, lockedDice[4] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.BLOCK_NUMBER[rolledDice[4]], null, p -> toggleLockDice(4));
+			display.addExclusiveAction(player, ButtonStyle.PRIMARY, Emojis.GAME_DIE, "Roll", p -> rollDice());
+			display.send();
 		}
 	}
 
 	private void savePlayerScore() {
-		JSONObject playerSave = getGlobalSave(player).orElseGet(JSONObject::new);
+		JSONObject playerSave = getSave(player).orElseGet(JSONObject::new);
 		System.out.println(playerSave.toString(2));
 		playerSave.put(JSONKEY_BESTSCORE, Math.max(getTotalScore(), playerSave.optInt(JSONKEY_BESTSCORE, 0)));
 		playerSave.put(JSONKEY_PLAYCOUNT, playerSave.optInt(JSONKEY_PLAYCOUNT, 0) + 1);
 		System.out.println(playerSave.toString(2));
-		setGlobalSave(player, Optional.of(playerSave));
+		setSave(player, Optional.of(playerSave));
 	}
 
 	private void toggleLockDice(int dice) {

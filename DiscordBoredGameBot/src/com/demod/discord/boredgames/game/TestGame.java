@@ -3,7 +3,8 @@ package com.demod.discord.boredgames.game;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 
-import net.dv8tion.jda.core.entities.Member;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
 
 public class TestGame extends Game {
 
@@ -12,21 +13,21 @@ public class TestGame extends Game {
 		return "Test Game";
 	}
 
-	private Member getVolunteer() {
-		return this.<Member>displayChannel(embed -> {
+	private User getVolunteer() {
+		return this.<User>displayChannel(embed -> {
 			embed.setDescription("Raise your hand for testing!");
-		}).addAction(Emojis.HAND_SPLAYED, p -> p).send();
+		}).addResultAction(ButtonStyle.SUCCESS, Emojis.HAND_SPLAYED, "Join", p -> p).send();
 	}
 
-	private boolean privateHighFive(Member player) {
+	private boolean privateHighFive(User player) {
 		displayChannel(embed -> {
 			embed.setDescription("Waiting for a response from **" + player.getEffectiveName() + "**...");
 		}).send();
 		boolean result = this.<Boolean>displayPrivate(player, embed -> {
 			embed.setDescription("Give me a high five! " + Emojis.HAND_SPLAYED);
 		})//
-				.addAction(Emojis.HAND_SPLAYED, true)//
-				.addAction(Emojis.TRACK_NEXT, false)//
+				.addResult(ButtonStyle.PRIMARY, Emojis.HAND_SPLAYED, "High Five", true)//
+				.addResult(ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Nah", false)//
 				.send();
 		displayPrivate(player, embed -> {
 			embed.setDescription("Thank you for the response!");
@@ -36,7 +37,7 @@ public class TestGame extends Game {
 
 	@Override
 	public void run() {
-		Member player = getVolunteer();
+		User player = getVolunteer();
 		boolean highFived = privateHighFive(player);
 		displayChannel(embed -> {
 			if (highFived) {

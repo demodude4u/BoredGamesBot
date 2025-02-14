@@ -16,6 +16,8 @@ import java.util.stream.Collectors;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.game.DominionGame.Player;
 
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+
 public enum DominionCard {
 
 	// Basic Cards
@@ -372,7 +374,7 @@ public enum DominionCard {
 
 	Chancellor(Emojis.OLDER_MAN, 3, Action, "+2C|You may immediately put your deck into your discard pile.", p -> {
 		p.addCoins(2);
-		if (p.chooseActionOrSkip(Emojis.ARROW_HEADING_UP, "Put your deck into your discard.",
+		if (p.chooseActionOrSkip(Emojis.ARROW_HEADING_UP, "Discard Deck", "Put your deck into your discard.",
 				"Choose action, or skip.")) {
 			p.getDiscard().addAll(p.getDeck());
 			p.getDeck().clear();
@@ -549,7 +551,7 @@ public enum DominionCard {
 	}
 
 	private final String title;
-	private final String emoji;
+	private final Emoji emoji;
 	private final int cost;
 	private final CardType<?> type;
 	private final CardSubType subType;
@@ -557,9 +559,9 @@ public enum DominionCard {
 	private final String text;
 	private String formattedText = null;
 
-	private Object typeFunction;
+	private final Object typeFunction;
 
-	private <F> DominionCard(String emoji, int cost, CardType<F> type, CardSubType subType, String text,
+	private <F> DominionCard(Emoji emoji, int cost, CardType<F> type, CardSubType subType, String text,
 			F typeFunction) {
 		this.typeFunction = typeFunction;
 		this.title = name().replace('_', ' ');
@@ -570,7 +572,7 @@ public enum DominionCard {
 		this.text = text;
 	}
 
-	private <F> DominionCard(String emoji, int cost, CardType<F> type, String text, F typeFunction) {
+	private <F> DominionCard(Emoji emoji, int cost, CardType<F> type, String text, F typeFunction) {
 		this(emoji, cost, type, CardSubType.None, text, typeFunction);
 	}
 
@@ -578,7 +580,7 @@ public enum DominionCard {
 		return cost;
 	}
 
-	public String getEmoji() {
+	public Emoji getEmoji() {
 		return emoji;
 	}
 

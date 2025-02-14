@@ -12,7 +12,10 @@ import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import net.dv8tion.jda.core.entities.Member;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.entities.emoji.UnicodeEmoji;
+import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
 
 public class Connect4Game extends Game {
 	public static enum Tile {
@@ -22,11 +25,11 @@ public class Connect4Game extends Game {
 	private static final int IN_A_ROW = 4;
 
 	private boolean hotseat;
-	private String[] emojiPlayerSet;
+	private UnicodeEmoji[] emojiPlayerSet;
 	private int columns = 7;
 	private int rows = 6;
 	private Tile[/* slot */][/* height */] tiles;
-	private final List<Member> players = new ArrayList<>(4);
+	private final List<User> players = new ArrayList<>(4);
 	private int winner = -1;
 	private int lastTurnColumn = -1;
 	private int lastTurn = -1;
@@ -145,18 +148,18 @@ public class Connect4Game extends Game {
 				Tile tile = tiles[column][height];
 				if (tile == Tile.NONE) {
 					if (height == rows - 1 && column == lastTurnColumn) {
-						sb.append(Emojis.SMALL_RED_DOWN_ARROW);
+						sb.append(Emojis.SMALL_RED_DOWN_ARROW.getFormatted());
 					} else {
-						sb.append(Emojis.SMALL_BLACK_SQUARE);
+						sb.append(Emojis.SMALL_BLACK_SQUARE.getFormatted());
 					}
 				} else {
-					sb.append(emojiPlayerSet[tile.ordinal() - 1]);
+					sb.append(emojiPlayerSet[tile.ordinal() - 1].getFormatted());
 				}
 			}
 			sb.append('\n');
 		}
 		for (int column = 0; column < columns; column++) {
-			sb.append(Emojis.BLOCK_NUMBER[column + 1]);
+			sb.append(Emojis.BLOCK_NUMBER[column + 1].getFormatted());
 		}
 		return sb.toString();
 	}
@@ -166,7 +169,7 @@ public class Connect4Game extends Game {
 		return "Connect Four!";
 	}
 
-	private void hotseatNewPlayer(Member player) {
+	private void hotseatNewPlayer(User player) {
 		if (players.size() < 4 && !players.contains(player)) {
 			players.add(player);
 
@@ -212,11 +215,12 @@ public class Connect4Game extends Game {
 			if (winner != -1) {
 				embed.addField(players.get(winner).getEffectiveName() + " Wins!",
 						IntStream.range(0, 4).mapToObj(i -> mystery ? Emojis.QUESTION : emojiPlayerSet[winner])
-								.collect(Collectors.joining()),
+								.map(Emoji::getFormatted).collect(Collectors.joining()),
 						true);
 			} else {
-				embed.addField("It's a Draw!", IntStream.range(0, players.size())
-						.mapToObj(i -> mystery ? Emojis.QUESTION : emojiPlayerSet[i]).collect(Collectors.joining()),
+				embed.addField("It's a Draw!",
+						IntStream.range(0, players.size()).mapToObj(i -> mystery ? Emojis.QUESTION : emojiPlayerSet[i])
+								.map(Emoji::getFormatted).collect(Collectors.joining()),
 						true);
 			}
 
@@ -231,9 +235,7 @@ public class Connect4Game extends Game {
 		while (hotseat) {
 			Display<Boolean> display = displayChannel(embed -> {
 				embed.setDescription(
-						"This is a 2-4 player game. Try to create a 4 in a row chain of your player token to win! Press the "
-								+ Emojis.HAND_SPLAYED + " to join, and press the " + Emojis.GAME_DIE
-								+ " to begin the game!");
+						"This is a 2-4 player game. Try to create a 4 in a row chain of your player token to win!");
 
 				if (!players.isEmpty()) {
 					embed.addField("Players",
@@ -245,12 +247,12 @@ public class Connect4Game extends Game {
 			});
 
 			if (players.size() < 4) {
-				display.addAction(Emojis.HAND_SPLAYED, player -> {
+				display.addAction(ButtonStyle.PRIMARY, Emojis.HAND_SPLAYED, "Join", player -> {
 					hotseatNewPlayer(player);
 				});
 			}
 			if (players.size() >= 2) {
-				display.addExclusiveAction(players, Emojis.GAME_DIE, player -> {
+				display.addExclusiveAction(players, ButtonStyle.DANGER, Emojis.GAME_DIE, "Start Game", player -> {
 					hotseat = false;
 				});
 			}
@@ -262,15 +264,15 @@ public class Connect4Game extends Game {
 	private void runPlayPhase() {
 		while (!isGameOver()) {
 			int turn = (lastTurn + 1) % players.size();
-			Member player = players.get(turn);
+			User player = players.get(turn);
 
 			Display<Integer> display = displayChannel(embed -> {
 				String message = IntStream.range(0, players.size()).mapToObj(i -> emojiPlayerSet[i])
-						.collect(Collectors.joining())
+						.map(Emoji::getFormatted).collect(Collectors.joining())
 						+ "\n"
 						+ IntStream.range(0, players.size())
 								.mapToObj(i -> (turn == i) ? Emojis.ARROW_UP : Emojis.SMALL_BLACK_SQUARE)
-								.collect(Collectors.joining());
+								.map(Emoji::getFormatted).collect(Collectors.joining());
 				embed.addField(player.getEffectiveName() + "'s Turn", message, true);
 
 				embed.setDescription(generateTilesEmoji());
@@ -281,7 +283,7 @@ public class Connect4Game extends Game {
 			for (int i = 0; i < columns; i++) {
 				final int column = i;
 				if (canMove(column)) {
-					display.addExclusiveAction(player, Emojis.BLOCK_NUMBER[column + 1], column);
+					display.addExclusiveResult(player, ButtonStyle.SECONDARY, null, Integer.toString(i + 1), column);
 				}
 			}
 

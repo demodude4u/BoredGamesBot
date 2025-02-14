@@ -18,27 +18,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import com.demod.dcba.CommandReporting;
 import com.demod.dcba.DCBA;
 import com.demod.dcba.DiscordBot;
-import com.demod.dcba.ReactionWatcher;
+import com.demod.dcba.SlashCommandEvent;
+import com.demod.discord.boredgames.Display.ActionButton;
 import com.demod.discord.boredgames.Display.ResultAction;
 import com.demod.discord.boredgames.game.Connect4Game;
 import com.demod.discord.boredgames.game.DominionGame;
 import com.demod.discord.boredgames.game.YahtzeeGame;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.AbstractScheduledService;
 
-import net.dv8tion.jda.core.Permission;
-import net.dv8tion.jda.core.entities.ChannelType;
-import net.dv8tion.jda.core.entities.Member;
-import net.dv8tion.jda.core.entities.Message;
-import net.dv8tion.jda.core.entities.MessageChannel;
-import net.dv8tion.jda.core.entities.MessageEmbed;
-import net.dv8tion.jda.core.entities.TextChannel;
-import net.dv8tion.jda.core.events.message.react.GenericMessageReactionEvent;
-import net.dv8tion.jda.core.events.message.react.MessageReactionAddEvent;
-import net.dv8tion.jda.core.events.message.react.MessageReactionRemoveEvent;
+import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.ChannelType;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
+import net.dv8tion.jda.api.interactions.components.LayoutComponent;
+import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
+import net.dv8tion.jda.api.requests.restaction.MessageEditAction;
 
 public class DiscordBoredGameBot extends AbstractScheduledService {
 	private static final int NOTIFY_MINUTES = 5;
@@ -56,52 +58,35 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 	private final AtomicInteger nextGameId = new AtomicInteger(0);
 
 	// Key = Message ID
-	private final Map<String, Consumer<GenericMessageReactionEvent>> awaitingReactions = new ConcurrentHashMap<>();
-	private final ConcurrentHashMap<Member, Entry<TextChannel, Long>> notifyMemberMillis = new ConcurrentHashMap<>();
-	private final ConcurrentHashMap<Member, Long> memberLastActionMillis = new ConcurrentHashMap<>();
+	private final Map<String, Consumer<ButtonInteractionEvent>> awaitingActions = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<User, Entry<TextChannel, Long>> notifyMemberMillis = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<User, Long> memberLastActionMillis = new ConcurrentHashMap<>();
 
 	public DiscordBoredGameBot() {
 		bot = DCBA.builder()//
-				.ignorePrivateChannels()//
-				//
 				.setInfo("Bored Game Bot")//
 				.withSupport("Message Demod for help or any found bugs!")//
-				.withInvite(Permission.MESSAGE_ADD_REACTION, Permission.MESSAGE_EMBED_LINKS,
-						Permission.MESSAGE_EXT_EMOJI, Permission.MESSAGE_MANAGE)
 				//
-				.addCommand("connect4", e -> startGame(e.getTextChannel(), new Connect4Game()))//
-				.withHelp("Start a game of Connect Four. (2-4 Players)")//
-				.addCommand("yahtzee", e -> startGame(e.getTextChannel(), new YahtzeeGame()))//
-				.withHelp("Start a game of Yahtzee! (1 Player)")//
-				.addCommand("dominion", e -> startGame(e.getTextChannel(), new DominionGame()))//
-				.withHelp("Start a game of Dominion! (2-4 Players)")//
+				.addSlashCommand("connect4", "Start a game of Connect Four. (2-4 Players)",
+						e -> startGame(e, new Connect4Game()))//
+				.addSlashCommand("yahtzee", "Start a game of Yahtzee! (1 Player)", e -> startGame(e, new YahtzeeGame()))//
+				.addSlashCommand("dominion", "Start a game of Dominion! (2-4 Players)",
+						e -> startGame(e, new DominionGame()))//
 				//
-				.withHelp("Specify `on` or `off` to turn on/off turn notifications.")
+				.addButtonHandler(this::onAction)//
 				//
-				.addReactionWatcher(new ReactionWatcher() {
-					@Override
-					public void seenReaction(MessageReactionAddEvent event) {
-						onAction(event);
-					}
-
-					@Override
-					public void seenReactionRemoved(MessageReactionRemoveEvent event) {
-						onAction(event);
-					}
-				})//
-					//
 				.create();
 	}
 
 	private void checkAndNotifyMembers() {
 		long nowMillis = System.currentTimeMillis();
 		Iterables.removeIf(notifyMemberMillis.entrySet(), entry -> {
-			Member player = entry.getKey();
+			User player = entry.getKey();
 			TextChannel channel = entry.getValue().getKey();
 			long notifyMillis = entry.getValue().getValue();
 			if (nowMillis > notifyMillis) {
 				try {
-					player.getUser().openPrivateChannel().complete()
+					player.openPrivateChannel().complete()
 							.sendMessage("Hi! It is your turn! ==> " + channel.getAsMention()).complete();
 					System.out.println("Notified " + player.getEffectiveName() + " to take their turn.");
 				} catch (Exception e) {
@@ -113,32 +98,31 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 		});
 	}
 
-	public void notifyForAction(Member player, TextChannel channel) {
+	public void notifyForAction(User player, TextChannel channel) {
 		Optional<Long> lastActionMillis = Optional.ofNullable(memberLastActionMillis.get(player));
 		notifyMemberMillis.put(player, new SimpleImmutableEntry<>(channel,
 				lastActionMillis.orElse(System.currentTimeMillis()) + TimeUnit.MINUTES.toMillis(NOTIFY_MINUTES)));
 		checkAndNotifyMembers();
 	}
 
-	private synchronized void onAction(GenericMessageReactionEvent e) {
-		if (e.getUser().isBot()) {
-			return;
-		}
-
-		Optional.ofNullable(awaitingReactions.get(e.getMessageId())).ifPresent(c -> {
-			if (e.isFromType(ChannelType.TEXT)) {
-				notifyMemberMillis.remove(e.getMember());
-				memberLastActionMillis.put(e.getMember(), System.currentTimeMillis());
+	private synchronized void onAction(ButtonInteractionEvent e, CommandReporting reporting) {
+		String id = e.getMessage().getId();
+		if (awaitingActions.containsKey(id)) {
+			Consumer<ButtonInteractionEvent> consumer = awaitingActions.get(id);
+			if (e.getChannelType() == ChannelType.TEXT) {
+				notifyMemberMillis.remove(e.getUser());
+				memberLastActionMillis.put(e.getUser(), System.currentTimeMillis());
 			}
 			executor.submit(() -> {
-				c.accept(e);
+				consumer.accept(e);
 			});
-		});
+		}
+		e.deferEdit().complete();
 	}
 
 	private Optional<Message> reloadMessage(Message message) {
 		try {
-			return Optional.ofNullable(message.getChannel().getMessageById(message.getId()).complete());
+			return Optional.ofNullable(message.getChannel().retrieveMessageById(message.getId()).complete());
 		} catch (Exception e) {
 			return Optional.empty();
 		}
@@ -160,35 +144,17 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 		games.values().forEach(g -> g.getThread().interrupt());
 	}
 
-	private synchronized void startGame(TextChannel channel, Game game) {
-		if (!channel.getGuild().getSelfMember().hasPermission(channel, Permission.MESSAGE_MANAGE)) {
-			channel.sendMessage(
-					"Insufficient permissions to start game! I Need `Manage Messages` to delete old reactions.")
-					.complete();
-			return;
-		}
-		if (!channel.getGuild().getSelfMember().hasPermission(channel, Permission.MESSAGE_ADD_REACTION)) {
-			channel.sendMessage(
-					"Insufficient permissions to start game! I Need `Add Reactions` to create action buttons.")
-					.complete();
-			return;
-		}
-		if (!channel.getGuild().getSelfMember().hasPermission(channel, Permission.MESSAGE_EMBED_LINKS)) {
-			channel.sendMessage("Insufficient permissions to start game! I Need `Embed Links` to create game displays.")
-					.complete();
-			return;
-		}
-
+	private synchronized void startGame(SlashCommandEvent e, Game game) {
 		int gameId = nextGameId.getAndIncrement();
 		Thread thread = new Thread(() -> {
 			try {
 				games.put(gameId, game);
-				game.setInternalInfo(this, channel, gameId, Thread.currentThread());
+				game.setInternalInfo(this, e, gameId, Thread.currentThread());
 				game.run();
-			} catch (Throwable e) {
-				e.printStackTrace();
+			} catch (Throwable ex) {
+				ex.printStackTrace();
 				System.err.println("GAME IS KILL :(");
-				throw e;
+				throw ex;
 			} finally {
 				System.out.println("GAME OVER: " + game.getClass().getSimpleName() + " #" + gameId);
 				games.remove(gameId);
@@ -201,7 +167,6 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 	@Override
 	protected void startUp() {
 		bot.startAsync().awaitRunning();
-		System.out.println(bot.getJDA().asBot().getInviteUrl());
 	}
 
 	public <T> Entry<Message, T> waitForDisplay(Display<T> display, MessageChannel channel, Optional<Message> message) {
@@ -219,50 +184,47 @@ public class DiscordBoredGameBot extends AbstractScheduledService {
 			message = Optional.empty();
 		}
 
-		if (message.isPresent()) {
-			message = Optional.ofNullable(
-					message.get().getChannel().editMessageById(message.get().getId(), messageEmbed).complete());
-		} else {
-			message = Optional.of(channel.sendMessage(messageEmbed).complete());
-		}
+		List<LayoutComponent> actionRows = display.getActionRows().stream()
+				.map(l -> ActionRow.of(l.stream().map(b -> b.button).collect(Collectors.toList())))
+				.filter(l -> !l.isEmpty()).collect(Collectors.toList());
 
-		LinkedHashMap<String, ResultAction<T>> actions = display.getActions();
-		List<String> lastActions = message.map(
-				m -> m.getReactions().stream().map(r -> r.getReactionEmote().getName()).collect(Collectors.toList()))
-				.orElseGet(ImmutableList::of);
-		if (!lastActions.isEmpty() && !Iterables.elementsEqual(lastActions, actions.keySet())
-				&& !display.isIgnoreReactions()) {
-			message.get().clearReactions().complete();
-			message = reloadMessage(message.get());
+		if (message.isPresent()) {
+			MessageEditAction editAction = message.get().getChannel().editMessageEmbedsById(message.get().getId(),
+					messageEmbed);
+			if (!actionRows.isEmpty()) {
+				editAction = editAction.setComponents(actionRows);
+			}
+			message = Optional.ofNullable(editAction.complete());
+		} else {
+			MessageCreateAction createAction = channel.sendMessageEmbeds(messageEmbed);
+			if (!actionRows.isEmpty()) {
+				createAction = createAction.setComponents(actionRows);
+			}
+			message = Optional.of(createAction.complete());
 		}
 
 		CompletableFuture<T> awaitor = new CompletableFuture<>();
 
+		LinkedHashMap<String, ActionButton<T>> actions = display.getActions();
 		if (!actions.isEmpty()) {
-			awaitingReactions.put(message.get().getId(), e -> {
-				if (!actions.containsKey(e.getReactionEmote().getName())) {
+			awaitingActions.put(message.get().getId(), e -> {
+				if (!actions.containsKey(e.getComponentId())) {
 					return;
 				}
 
-				ResultAction<T> action = actions.get(e.getReactionEmote().getName());
-				if (!action.accept(e.getMember())) {
+				ResultAction<T> action = actions.get(e.getComponentId()).action;
+				if (!action.accept(e.getUser())) {
 					return;
 				}
 
 				try {
-					T result = action.call(e.getMember());
+					T result = action.call(e.getUser());
 					awaitor.complete(result);
 				} catch (Exception e1) {
 					awaitor.completeExceptionally(e1);
 					System.out.println("ACTION EXCEPTIONED - " + e1.getMessage());
 				}
 			});
-
-			if (!display.isIgnoreReactions()) {
-				for (String emoji : actions.keySet()) {
-					message.get().addReaction(emoji).complete();
-				}
-			}
 		} else {
 			awaitor.complete(null);
 		}

@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Random;
@@ -22,17 +21,33 @@ import com.demod.discord.boredgames.Display;
 import com.demod.discord.boredgames.Emojis;
 import com.demod.discord.boredgames.Game;
 import com.demod.discord.boredgames.game.DominionCard.CardType;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Multiset;
 
-import net.dv8tion.jda.core.EmbedBuilder;
-import net.dv8tion.jda.core.entities.Member;
+import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.interactions.components.buttons.ButtonStyle;
 
 public class DominionGame extends Game {
 
+	public static class ActionOption<T> {
+		public final Emoji emoji;
+		public final String label;
+		public final String message;
+		public final T result;
+
+		public ActionOption(Emoji emoji, String label, String message, T result) {
+			this.emoji = emoji;
+			this.label = label;
+			this.message = message;
+			this.result = result;
+		}
+	}
+
 	public class Player {
-		private final Member member;
+		private final User user;
 
 		private final List<DominionCard> deck = new ArrayList<>();
 		private final List<DominionCard> discard = new ArrayList<>();
@@ -47,8 +62,8 @@ public class DominionGame extends Game {
 
 		public boolean skipPhase;
 
-		public Player(Member member) {
-			this.member = member;
+		public Player(User user) {
+			this.user = user;
 		}
 
 		public void addActions(int count) {
@@ -79,8 +94,10 @@ public class DominionGame extends Game {
 			return hand.stream().anyMatch(c -> c.getType() == CardType.Treasure);
 		}
 
-		public boolean chooseActionOrSkip(String actionEmoji, String actionMessage, String message) {
-			return requestAction(this, ImmutableMap.of(actionEmoji, actionMessage), message, true, false).isPresent();
+		public boolean chooseActionOrSkip(Emoji actionEmoji, String actionLabel, String actionMessage, String message) {
+			return requestAction(this,
+					ImmutableList.of(new ActionOption<Boolean>(actionEmoji, actionLabel, actionMessage, true)), message,
+					true, false).orElse(false);
 		}
 
 		public DominionCard chooseCard(List<DominionCard> choices, String message) {
@@ -165,12 +182,8 @@ public class DominionGame extends Game {
 			return hand;
 		}
 
-		public Member getMember() {
-			return member;
-		}
-
 		public String getName() {
-			return member.getEffectiveName();
+			return user.getEffectiveName();
 		}
 
 		public List<Player> getOtherPlayers() {
@@ -197,6 +210,10 @@ public class DominionGame extends Game {
 
 		public int getTotalCardCount() {
 			return deck.size() + discard.size() + hand.size() + play.size();
+		}
+
+		public User getUser() {
+			return user;
 		}
 
 		public DominionCard hiddenChooseCard(List<DominionCard> choices, String message) {
@@ -399,7 +416,7 @@ public class DominionGame extends Game {
 	private String generatePlayerStats(Player player, boolean showActionsRemaining) {
 		List<String> lines = new ArrayList<>();
 
-		lines.add("Player: **" + player.getMember().getEffectiveName() + "**");
+		lines.add("Player: **" + player.getUser().getEffectiveName() + "**");
 
 		if (showActionsRemaining) {
 			lines.add("Actions: **" + player.actionsAvailable + "**");
@@ -493,36 +510,36 @@ public class DominionGame extends Game {
 	private void registerCardChoices(Display<?> display, Player player, LinkedHashSet<DominionCard> playActionChoices,
 			Consumer<DominionCard> action) {
 		for (DominionCard card : playActionChoices) {
-			display.addExclusiveAction(player.getMember(), card.getEmoji(), p -> action.accept(card));
+			display.addExclusiveAction(player.getUser(), ButtonStyle.SECONDARY, card.getEmoji(), card.getTitle(),
+					p -> action.accept(card));
 		}
 	}
 
-	private Optional<String> requestAction(Player player, Map<String, String> actionEmojiMessages, String message,
+	private <T> Optional<T> requestAction(Player player, List<ActionOption<T>> actionOptions, String message,
 			boolean skippable, boolean hidden) {
 		if (skippable) {
-			if (actionEmojiMessages.isEmpty()) {
+			if (actionOptions.isEmpty()) {
 				return Optional.empty();
 			}
 		} else {
-			if (actionEmojiMessages.size() == 1) {
-				return actionEmojiMessages.keySet().stream().findFirst();
+			if (actionOptions.size() == 1) {
+				return Optional.of(actionOptions.get(0).result);
 			}
 		}
 
-		Display<Optional<String>> display = hidden ? displayPrivate(player.getMember()) : displayChannel();
+		Display<Optional<T>> display = hidden ? displayPrivate(player.getUser()) : displayChannel();
 		EmbedBuilder embed = display.getBuilder();
 		embed.addField("Choosing Player", generatePlayerStats(player, false), true);
 		embed.setDescription(message);
 
-		for (Entry<String, String> entry : actionEmojiMessages.entrySet()) {
-			String actionEmoji = entry.getKey();
-			String actionMessage = entry.getValue();
-			embed.addField(actionEmoji + " Action Choice", actionMessage, true);
-			display.addExclusiveAction(player.getMember(), actionEmoji, Optional.of(actionEmoji));
+		for (ActionOption<T> option : actionOptions) {
+			display.addExclusiveResult(player.getUser(), ButtonStyle.SECONDARY, option.emoji, option.label,
+					Optional.of(option.result));
 		}
 
 		if (skippable) {
-			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+			display.addExclusiveResult(player.getUser(), ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip",
+					Optional.empty());
 		}
 
 		return display.send();
@@ -543,12 +560,12 @@ public class DominionGame extends Game {
 
 		if (hidden) {
 			displayChannel(embed -> {
-				embed.setDescription("Sent **" + player.getMember().getEffectiveName()
+				embed.setDescription("Sent **" + player.getUser().getEffectiveName()
 						+ "** a private message.  Waiting for a response...");
 			}).send();
 		}
 
-		Display<Optional<DominionCard>> display = hidden ? displayPrivate(player.getMember()) : displayChannel();
+		Display<Optional<DominionCard>> display = hidden ? displayPrivate(player.getUser()) : displayChannel();
 		EmbedBuilder embed = display.getBuilder();
 		if (!hidden) {
 			embed.addField("Choosing Player", generatePlayerStats(player, false), true);
@@ -559,24 +576,26 @@ public class DominionGame extends Game {
 		for (DominionCard card : uniqueChoices) {
 			embed.addField(card.getEmoji() + " Choose " + card.getTitle(), card.getText(), true);
 			if (hidden) {
-				display.addAction(card.getEmoji(), Optional.of(card));
+				display.addResult(ButtonStyle.SECONDARY, card.getEmoji(), card.getTitle(), Optional.of(card));
 			} else {
-				display.addExclusiveAction(player.getMember(), card.getEmoji(), Optional.of(card));
+				display.addExclusiveResult(player.getUser(), ButtonStyle.SECONDARY, card.getEmoji(), card.getTitle(),
+						Optional.of(card));
 			}
 		}
 
 		if (skippable) {
 			if (hidden) {
-				display.addAction(Emojis.TRACK_NEXT, Optional.empty());
+				display.addResult(ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip", Optional.empty());
 			} else {
-				display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, Optional.empty());
+				display.addExclusiveResult(player.getUser(), ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip",
+						Optional.empty());
 			}
 		}
 
 		Optional<DominionCard> result = display.send();
 
 		if (hidden) {
-			displayPrivate(player.getMember(), e -> {
+			displayPrivate(player.getUser(), e -> {
 				e.setDescription("Your response has been submitted.");
 			}).send();
 		}
@@ -589,7 +608,7 @@ public class DominionGame extends Game {
 			embed.addField("Current Player", generatePlayerStats(player, false), true);
 			embed.setDescription(message);
 			embed.addField("Revealed Cards", generateDisplayCardList(cards), true);
-		}).addExclusiveAction(player.getMember(), Emojis.BLOCK_OK, p -> {
+		}).addExclusiveAction(player.getUser(), ButtonStyle.SECONDARY, null, "Okay", p -> {
 		}).send();
 	}
 
@@ -632,7 +651,7 @@ public class DominionGame extends Game {
 			});
 
 			registerCardChoices(display, player, getBuyChoices(player), c -> buyChooseCard(player, c));
-			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+			display.addExclusiveAction(player.getUser(), ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip", p -> {
 				player.skipPhase = true;
 			});
 
@@ -654,7 +673,7 @@ public class DominionGame extends Game {
 	private void runHotseatPhase() {
 		hotseat = true;
 		while (hotseat) {
-			List<Member> playerMembers = players.stream().map(Player::getMember).collect(Collectors.toList());
+			List<User> playerMembers = players.stream().map(Player::getUser).collect(Collectors.toList());
 
 			Display<?> display = displayChannel(embed -> {
 				embed.setDescription("This is a 2-4 player game, and can take some time to play.\n\n"
@@ -674,17 +693,18 @@ public class DominionGame extends Game {
 			});
 
 			if (players.size() < 4) {
-				display.addAction(Emojis.HAND_SPLAYED, p -> {
-					if (players.size() < 4 && !players.stream().anyMatch(p2 -> p2.getMember().equals(p))) {
+				display.addAction(ButtonStyle.SUCCESS, Emojis.HAND_SPLAYED, "Join", p -> {
+					if (players.size() < 4 && !players.stream().anyMatch(p2 -> p2.getUser().equals(p))) {
 						players.add(new Player(p));
 					}
 				});
 			}
-			display.addExclusiveAction(playerMembers, Emojis.SHUFFLE, p -> {
-				pickKingdoms();
-			});
+			display.addExclusiveAction(playerMembers, ButtonStyle.SECONDARY, Emojis.SHUFFLE, "Randomize Kingdoms",
+					p -> {
+						pickKingdoms();
+					});
 			if (players.size() >= 2) {
-				display.addExclusiveAction(playerMembers, Emojis.GAME_DIE, p -> {
+				display.addExclusiveAction(playerMembers, ButtonStyle.DANGER, Emojis.GAME_DIE, "Start Game", p -> {
 					hotseat = false;
 				});
 			}
@@ -716,7 +736,7 @@ public class DominionGame extends Game {
 			});
 
 			registerCardChoices(display, player, getPlayActionChoices(player), c -> playActionsChooseCard(player, c));
-			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+			display.addExclusiveAction(player.getUser(), ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip", p -> {
 				player.skipPhase = true;
 			});
 
@@ -746,7 +766,7 @@ public class DominionGame extends Game {
 
 			registerCardChoices(display, player, getPlayTreasureChoices(player),
 					c -> playTreasuresChooseCard(player, c));
-			display.addExclusiveAction(player.getMember(), Emojis.TRACK_NEXT, p -> {
+			display.addExclusiveAction(player.getUser(), ButtonStyle.SECONDARY, Emojis.TRACK_NEXT, "Skip", p -> {
 				player.skipPhase = true;
 			});
 
