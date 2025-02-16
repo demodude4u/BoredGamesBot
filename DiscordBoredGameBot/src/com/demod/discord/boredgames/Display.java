@@ -44,13 +44,12 @@ public class Display<T> {
 			this(style, emoji, label, new ResultAction<T>() {
 				@Override
 				public boolean accept(User player) {
-					return action.accept(player);
+					return players.stream().anyMatch(p2 -> player.getId().equals(p2.getId())) && action.accept(player);
 				}
 
 				@Override
 				public T call(User p) {
-					action.call(p);
-					return null;
+					return action.call(p);
 				}
 			});
 		}
