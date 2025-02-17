@@ -481,6 +481,13 @@ public class YahtzeeGame extends Game {
 					Emojis.BLOCK_NUMBER[rolledDice[3]], null, p -> toggleLockDice(3));
 			display.addExclusiveAction(player, lockedDice[4] ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
 					Emojis.BLOCK_NUMBER[rolledDice[4]], null, p -> toggleLockDice(4));
+			display.addExclusiveAction(player,
+					Booleans.asList(lockedDice).stream().allMatch(b -> b) ? ButtonStyle.DANGER : ButtonStyle.SECONDARY,
+					Emojis.LOCK, "Lock All", p -> {
+						for (int i = 0; i < lockedDice.length; i++) {
+							lockedDice[i] = true;
+						}
+					});
 			display.addExclusiveAction(player, ButtonStyle.PRIMARY, Emojis.GAME_DIE, "Roll", p -> rollDice());
 			display.send();
 		}
